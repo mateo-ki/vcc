@@ -13,7 +13,7 @@ QString fromCodePoints(std::initializer_list<char32_t> points)
 
 }
 
-// platformUnsupported <- system_proxy/mod.rs
+// platformUnsupported <- system_proxy/mod.rs:70
 // ASCII 骨架: ""
 QString platformUnsupported()
 {
@@ -23,7 +23,7 @@ QString platformUnsupported()
     });
 }
 
-// wininetNotifyFailed <- system_proxy/mod.rs
+// wininetNotifyFailed <- system_proxy/mod.rs:70
 // ASCII 骨架: " WinINet "
 QString wininetNotifyFailed()
 {
@@ -34,7 +34,7 @@ QString wininetNotifyFailed()
     });
 }
 
-// regExitCode <- system_proxy/mod.rs
+// regExitCode <- system_proxy/mod.rs:205
 // ASCII 骨架: "reg.exe  {:?}"
 QString regExitCode()
 {
@@ -44,7 +44,7 @@ QString regExitCode()
     });
 }
 
-// deleteValueFailed <- system_proxy/mod.rs
+// deleteValueFailed <- system_proxy/mod.rs:227
 // ASCII 骨架: " {name} : {}"
 QString deleteValueFailed()
 {
@@ -55,7 +55,7 @@ QString deleteValueFailed()
     });
 }
 
-// modifyFailed <- system_proxy/mod.rs
+// modifyFailed <- system_proxy/mod.rs:237
 // ASCII 骨架: ": {detail}"
 QString modifyFailed()
 {
@@ -66,7 +66,7 @@ QString modifyFailed()
     });
 }
 
-// writtenPrefix <- system_proxy/terminal.rs
+// writtenPrefix <- system_proxy/terminal.rs:33
 // ASCII 骨架: " {}"
 QString writtenPrefix()
 {
@@ -75,7 +75,7 @@ QString writtenPrefix()
     });
 }
 
-// removedPrefix <- system_proxy/terminal.rs
+// removedPrefix <- system_proxy/terminal.rs:33
 // ASCII 骨架: " {}"
 QString removedPrefix()
 {
@@ -84,7 +84,7 @@ QString removedPrefix()
     });
 }
 
-// untouchedPrefix <- system_proxy/terminal.rs
+// untouchedPrefix <- system_proxy/terminal.rs:33
 // ASCII 骨架: " {}"
 QString untouchedPrefix()
 {
@@ -94,7 +94,7 @@ QString untouchedPrefix()
     });
 }
 
-// noChange <- system_proxy/terminal.rs
+// noChange <- system_proxy/terminal.rs:41
 // ASCII 骨架: ""
 QString noChange()
 {
@@ -104,7 +104,7 @@ QString noChange()
     });
 }
 
-// joiner <- system_proxy/terminal.rs
+// joiner <- system_proxy/terminal.rs:44
 // ASCII 骨架: "  "
 QString joiner()
 {
@@ -113,7 +113,7 @@ QString joiner()
     });
 }
 
-// writeFailed <- system_proxy/terminal.rs
+// writeFailed <- system_proxy/terminal.rs:58
 // ASCII 骨架: " {name} : {}"
 QString writeFailed()
 {
@@ -123,7 +123,7 @@ QString writeFailed()
     });
 }
 
-// removeFailed <- system_proxy/terminal.rs
+// removeFailed <- system_proxy/terminal.rs:58
 // ASCII 骨架: " {name} : {}"
 QString removeFailed()
 {
@@ -133,7 +133,7 @@ QString removeFailed()
     });
 }
 
-// alreadyYours <- system_proxy/terminal.rs
+// alreadyYours <- system_proxy/terminal.rs:155
 // ASCII 骨架: "{name} {existing}"
 QString alreadyYours()
 {
@@ -148,7 +148,7 @@ QString alreadyYours()
     });
 }
 
-// windowsOnly <- system_proxy/terminal.rs
+// windowsOnly <- system_proxy/terminal.rs:208
 // ASCII 骨架: " Windows "
 QString windowsOnly()
 {
@@ -159,7 +159,7 @@ QString windowsOnly()
     });
 }
 
-// noProxyValue <- system_proxy/terminal.rs
+// noProxyValue <- system_proxy/terminal.rs:12
 // ASCII 骨架: "localhost;127.0.0.1;::1;<local>;192.168.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*"
 QString noProxyValue()
 {

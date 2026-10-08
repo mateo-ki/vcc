@@ -7,22 +7,32 @@ import fs from 'node:fs';
 // 找到 0 个或多个就报错退出，绝不猜。
 const RUST = 'D:/project/rust/vs/vpn-parser/src';
 
+const outputs = {
+  sysproxy: {
+    header: 'D:/project/cpp/vcc/src/sysproxy/Messages.h',
+    source: 'D:/project/cpp/vcc/src/sysproxy/Messages.cpp',
+    ns: 'SysProxy::Messages',
+    include: '#include "sysproxy/Messages.h"',
+  },
+};
+
 const entries = [
-  ['platformUnsupported', 'system_proxy/mod.rs', 'Err(anyhow!("', 0],
-  ['wininetNotifyFailed', 'system_proxy/mod.rs', 'Err(anyhow!("', 4],
-  ['regExitCode', 'system_proxy/mod.rs', 'format!("reg.exe', 0],
-  ['deleteValueFailed', 'system_proxy/mod.rs', 'reg_failure_detail(&output)', 0],
-  ['modifyFailed', 'system_proxy/mod.rs', 'let detail = reg_failure_detail', 0],
-  ['writtenPrefix', 'system_proxy/terminal.rs', 'parts.push(format!(', 0],
-  ['removedPrefix', 'system_proxy/terminal.rs', 'parts.push(format!(', 1],
-  ['untouchedPrefix', 'system_proxy/terminal.rs', 'parts.push(format!(', 2],
-  ['noChange', 'system_proxy/terminal.rs', 'if parts.is_empty()', 0],
-  ['joiner', 'system_proxy/terminal.rs', 'parts.join(', 0],
-  ['writeFailed', 'system_proxy/terminal.rs', 'String::from_utf8_lossy(&output.stdout)', 1],
-  ['removeFailed', 'system_proxy/terminal.rs', 'String::from_utf8_lossy(&output.stdout)', 2],
-  ['alreadyYours', 'system_proxy/terminal.rs', 'if !is_ours(&existing)', 0],
-  ['windowsOnly', 'system_proxy/terminal.rs', 'pub fn enable(_port: u16)', 0],
-  ['noProxyValue', 'system_proxy/terminal.rs', 'pub const NO_PROXY_VALUE', 0, 'any'],
+  ['platformUnsupported', 'system_proxy/mod.rs', 'Err(anyhow!("', 0, 'nonAscii', 'sysproxy'],
+  ['wininetNotifyFailed', 'system_proxy/mod.rs', 'Err(anyhow!("', 4, 'nonAscii', 'sysproxy'],
+  ['regExitCode', 'system_proxy/mod.rs', 'format!("reg.exe', 0, 'nonAscii', 'sysproxy'],
+  ['deleteValueFailed', 'system_proxy/mod.rs', 'reg_failure_detail(&output)', 0, 'nonAscii', 'sysproxy'],
+  ['modifyFailed', 'system_proxy/mod.rs', 'let detail = reg_failure_detail', 0, 'nonAscii', 'sysproxy'],
+  ['writtenPrefix', 'system_proxy/terminal.rs', 'parts.push(format!(', 0, 'nonAscii', 'sysproxy'],
+  ['removedPrefix', 'system_proxy/terminal.rs', 'parts.push(format!(', 1, 'nonAscii', 'sysproxy'],
+  ['untouchedPrefix', 'system_proxy/terminal.rs', 'parts.push(format!(', 2, 'nonAscii', 'sysproxy'],
+  ['noChange', 'system_proxy/terminal.rs', 'if parts.is_empty()', 0, 'nonAscii', 'sysproxy'],
+  ['joiner', 'system_proxy/terminal.rs', 'parts.join(', 0, 'nonAscii', 'sysproxy'],
+  ['writeFailed', 'system_proxy/terminal.rs', 'String::from_utf8_lossy(&output.stdout)', 1, 'nonAscii', 'sysproxy'],
+  ['removeFailed', 'system_proxy/terminal.rs', 'String::from_utf8_lossy(&output.stdout)', 2, 'nonAscii', 'sysproxy'],
+  ['alreadyYours', 'system_proxy/terminal.rs', 'if !is_ours(&existing)', 0, 'nonAscii', 'sysproxy'],
+  ['windowsOnly', 'system_proxy/terminal.rs', 'pub fn enable(_port: u16)', 0, 'nonAscii', 'sysproxy'],
+  ['noProxyValue', 'system_proxy/terminal.rs', 'pub const NO_PROXY_VALUE', 0, 'any', 'sysproxy'],
+
 ];
 
 // 纯 ASCII 的常量（比如 NO_PROXY 列表）直接生成字符串字面量，可读性优先；
@@ -66,16 +76,18 @@ function toCppArray(text) {
   return [...text].map((ch) => '0x' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
 }
 
-const functions = [];
-const declarations = [];
+const buckets = new Map();
+for (const target of Object.keys(outputs)) {
+  buckets.set(target, { functions: [], declarations: [] });
+}
 
-for (const [name, file, anchor, occurrence, mode] of entries) {
+for (const [name, file, anchor, occurrence, mode, target = 'sysproxy'] of entries) {
   const lines = fs.readFileSync(RUST + '/' + file, 'utf8').split(/\r?\n/);
   const literal = pickLiteral(lines, anchor, occurrence, name, mode);
   const parts = toCppArray(literal);
   const skeleton = [...literal].filter((c) => c.codePointAt(0) < 0x7f).join('');
   const body = [];
-  body.push(`// ${name} <- ${file}`);
+  body.push(`// ${name} <- ${file}:${lines.indexOf(lines.find((l) => l.includes(anchor))) + 1}`);
   body.push(`// ASCII 骨架: ${JSON.stringify(skeleton)}`);
   body.push('QString ' + name + '()');
   body.push('{');
@@ -92,46 +104,55 @@ for (const [name, file, anchor, occurrence, mode] of entries) {
   }
   body.push('}');
   body.push('');
-  functions.push(body.join('\n'));
-  declarations.push('QString ' + name + '();');
-  const asciiSkeleton = [...literal].filter((c) => c.codePointAt(0) < 0x7f).join('');
-  console.log(`${name}: ${parts.length} chars, ascii skeleton = ${JSON.stringify(asciiSkeleton)}`);
+  const bucket = buckets.get(target);
+  if (!bucket) {
+    console.error('unknown output target: ' + target + ' for ' + name);
+    process.exit(1);
+  }
+  bucket.functions.push(body.join('\n'));
+  bucket.declarations.push('QString ' + name + '();');
+  console.log(`${target}.${name}: ${parts.length} chars, skeleton = ${JSON.stringify(skeleton)}`);
 }
 
-const source = [
-  '// 由 tools/gen-cjk-codepoints.mjs 从 Rust 源生成，请勿手改。',
-  '// 这些提示文本要与 vpn-parser 的 Rust 实现逐字一致（错误消息会进界面和日志）。',
-  '#include "sysproxy/Messages.h"',
-  '',
-  '#include <initializer_list>',
-  '',
-  'namespace SysProxy::Messages {',
-  'namespace {',
-  'QString fromCodePoints(std::initializer_list<char32_t> points)',
-  '{',
-  '    return QString::fromUcs4(points.begin(), qsizetype(points.size()));',
-  '}',
-  '',
-  '}',
-  '',
-  ...functions,
-  '}',
-].join('\n');
-
-const header = [
-  '// 由 tools/gen-cjk-codepoints.mjs 生成，请勿手改。',
-  '#pragma once',
-  '',
-  '#include <QString>',
-  '',
-  'namespace SysProxy::Messages {',
-  '',
-  ...declarations,
-  '',
-  '}',
-  '',
-].join('\n');
-
-fs.writeFileSync('D:/project/cpp/vcc/src/sysproxy/Messages.cpp', source);
-fs.writeFileSync('D:/project/cpp/vcc/src/sysproxy/Messages.h', header);
-console.log('generated ' + entries.length + ' message(s)');
+for (const [target, config] of Object.entries(outputs)) {
+  const bucket = buckets.get(target);
+  if (!bucket.functions.length) {
+    continue;
+  }
+  const source = [
+    '// 由 tools/gen-cjk-codepoints.mjs 从 Rust 源生成，请勿手改。',
+    '// 这些提示文本要与 vpn-parser 的 Rust 实现逐字一致（错误消息会进界面和日志）。',
+    config.include,
+    '',
+    '#include <initializer_list>',
+    '',
+    `namespace ${config.ns} {`,
+    'namespace {',
+    'QString fromCodePoints(std::initializer_list<char32_t> points)',
+    '{',
+    '    return QString::fromUcs4(points.begin(), qsizetype(points.size()));',
+    '}',
+    '',
+    '}',
+    '',
+    ...bucket.functions,
+    '}',
+    '',
+  ].join('\n');
+  const header = [
+    '// 由 tools/gen-cjk-codepoints.mjs 生成，请勿手改。',
+    '#pragma once',
+    '',
+    '#include <QString>',
+    '',
+    `namespace ${config.ns} {`,
+    '',
+    ...bucket.declarations,
+    '',
+    '}',
+    '',
+  ].join('\n');
+  fs.writeFileSync(config.source, source);
+  fs.writeFileSync(config.header, header);
+  console.log(target + ': wrote ' + bucket.functions.length + ' message(s)');
+}

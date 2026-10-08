@@ -41,6 +41,7 @@ add_test(NAME vccSysProxyTests COMMAND vccSysProxyTests)
 
 qt_add_executable(vccProxyTests
     proxy/ConfigTypesTests.cpp
+    proxy/DiagnosticsTests.cpp
 )
 
 target_include_directories(vccProxyTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -97,3 +98,28 @@ target_link_libraries(vccDbTests PRIVATE
 vcc_target_options(vccDbTests)
 
 add_test(NAME vccDbTests COMMAND vccDbTests)
+
+qt_add_executable(vccParserTests
+    parser/ParserTests.cpp
+)
+
+target_include_directories(vccParserTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+target_link_libraries(vccParserTests PRIVATE
+    vccParser
+    vccCore
+    vccModels
+    Qt6::Core
+    GTest::gtest
+    GTest::gtest_main
+)
+
+vcc_target_options(vccParserTests)
+
+add_test(NAME vccParserTests COMMAND vccParserTests)
+
+qt_add_executable(vccExportTests export/ExportTests.cpp)
+target_include_directories(vccExportTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(vccExportTests PRIVATE vccExport vccCore vccModels Qt6::Core GTest::gtest GTest::gtest_main)
+vcc_target_options(vccExportTests)
+add_test(NAME vccExportTests COMMAND vccExportTests)

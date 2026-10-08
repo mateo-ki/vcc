@@ -75,7 +75,7 @@ std::optional<quint16> asU16(const Json &value)
 
 const Json *member(const Json &value, const char *key)
 {
-    const auto *obj = value.get_ptr<const ProxyObject>();
+    const auto *obj = value.get_ptr<const ProxyObject *>();
     if (obj == nullptr) {
         return nullptr;
     }

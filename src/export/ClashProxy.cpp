@@ -167,14 +167,14 @@ void stripEmptyStrings(ProxyObject &obj, std::initializer_list<const char *> key
 
 void setType(Json &cfg, const char *type)
 {
-    if (ProxyObject *obj = cfg.get_ptr<ProxyObject>()) {
+    if (ProxyObject *obj = cfg.get_ptr<ProxyObject *>()) {
         put(*obj, "type", jsonOf(QString::fromUtf8(type)));
     }
 }
 
 void ensureServerPortName(Json &cfg, const Models::Node &node)
 {
-    ProxyObject *obj = cfg.get_ptr<ProxyObject>();
+    ProxyObject *obj = cfg.get_ptr<ProxyObject *>();
     if (obj == nullptr) {
         return;
     }
@@ -272,7 +272,7 @@ void normalizeSs(Json &cfg, const Models::Node &node)
 {
     setType(cfg, "ss");
     ensureServerPortName(cfg, node);
-    ProxyObject *obj = cfg.get_ptr<ProxyObject>();
+    ProxyObject *obj = cfg.get_ptr<ProxyObject *>();
     if (obj == nullptr) {
         return;
     }
@@ -289,7 +289,7 @@ void normalizeVmess(Json &cfg, const Models::Node &node)
 {
     setType(cfg, "vmess");
     ensureServerPortName(cfg, node);
-    ProxyObject *obj = cfg.get_ptr<ProxyObject>();
+    ProxyObject *obj = cfg.get_ptr<ProxyObject *>();
     if (obj == nullptr) {
         return;
     }
@@ -387,7 +387,7 @@ void normalizeVless(Json &cfg, const Models::Node &node)
 {
     setType(cfg, "vless");
     ensureServerPortName(cfg, node);
-    ProxyObject *obj = cfg.get_ptr<ProxyObject>();
+    ProxyObject *obj = cfg.get_ptr<ProxyObject *>();
     if (obj == nullptr) {
         return;
     }
@@ -472,7 +472,7 @@ void normalizeTrojan(Json &cfg, const Models::Node &node)
 {
     setType(cfg, "trojan");
     ensureServerPortName(cfg, node);
-    ProxyObject *obj = cfg.get_ptr<ProxyObject>();
+    ProxyObject *obj = cfg.get_ptr<ProxyObject *>();
     if (obj == nullptr) {
         return;
     }
@@ -531,7 +531,7 @@ void normalizeHysteria2(Json &cfg, const Models::Node &node)
 {
     setType(cfg, "hysteria2");
     ensureServerPortName(cfg, node);
-    ProxyObject *obj = cfg.get_ptr<ProxyObject>();
+    ProxyObject *obj = cfg.get_ptr<ProxyObject *>();
     if (obj == nullptr) {
         return;
     }
@@ -676,7 +676,7 @@ QVector<Json> nodesToClashProxies(const QVector<Models::Node> &nodes)
                        .arg(node.protocol, node.server, QString::number(node.port));
         }
         const QString name = uniqueName(base, usedNames, idx);
-        if (ProxyObject *obj = proxy->get_ptr<ProxyObject>()) {
+        if (ProxyObject *obj = proxy->get_ptr<ProxyObject *>()) {
             put(*obj, "name", jsonOf(name));
         }
         proxies.append(*proxy);

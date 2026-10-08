@@ -46,7 +46,7 @@ QString trimRs(const QString &text)
 
 const Json *member(const Json &value, const char *key)
 {
-    const auto *obj = value.get_ptr<const Json::object_t>();
+    const auto *obj = value.get_ptr<const Json::object_t *>();
     if (obj == nullptr) {
         return nullptr;
     }
@@ -408,21 +408,20 @@ bool liveProbeNode(const Models::Node &node, quint32 timeoutMs)
     QElapsedTimer clock;
     clock.start();
 
+    const qint64 budget = msecs;
     if (!needsTls(node)) {
         QTcpSocket socket;
         socket.connectToHost(host, static_cast<quint16>(node.port));
-        if (!socket.waitForConnected(msecs)) {
+        if (!socket.waitForConnected(static_cast<int>(budget))) {
             return false;
         }
         // 明文 SS / none 安全：TCP 连得上就是能便宜验证的全部了，
         // 只再排除一眼就是网站的。
         const qint64 elapsed = clock.elapsed();
-        const qint64 budget = elapsed < msecs ? msecs - elapsed : 0;
-        return !looksLikeImmediateHttp(socket, budget);
+        const qint64 remaining = elapsed < budget ? budget - elapsed : 0;
+        return !looksLikeImmediateHttp(socket, remaining);
     }
 
-    const qint64 elapsed = clock.elapsed();
-    const qint64 budget = elapsed < msecs ? msecs - elapsed : 0;
     return tlsHandshake(host, static_cast<quint16>(node.port), sniFor(node), budget);
 }
 
@@ -478,7 +477,8 @@ QVector<Models::Node> liveFilterForExport(QVector<Models::Node> nodes, quint32 w
     {
         std::unique_lock lock(shared.mutex);
         shared.changed.wait(lock, [&] {
-            return static_cast<quint32>(shared.survivors.size()) >= want || shared.finished == total;
+            return shared.survivors.size() >= static_cast<qsizetype>(want)
+                   || shared.finished == total;
         });
         while (!shared.survivors.empty() && kept.size() < static_cast<qsizetype>(want)) {
             kept.append(nodes.at(shared.survivors.front()));

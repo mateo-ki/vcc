@@ -183,8 +183,8 @@ QString decodeUtf8(const QByteArray& bytes, bool lossy, bool& ok)
 
         if (!broken && consumed == need) {
             if (codePoint > 0xFFFFu) {
-                out.append(QChar::highSurrogate(qchar32_t(codePoint)));
-                out.append(QChar::lowSurrogate(qchar32_t(codePoint)));
+                out.append(QChar::highSurrogate(char32_t(codePoint)));
+                out.append(QChar::lowSurrogate(char32_t(codePoint)));
             } else {
                 out.append(QChar(ushort(codePoint)));
             }
@@ -306,7 +306,7 @@ qsizetype codePointCount(const QString& text)
 {
     qsizetype count = 0;
     for (qsizetype i = 0; i < text.size(); ++i) {
-        if (!QChar::isLowSurrogate(text.at(i))) {
+        if (!QChar::isLowSurrogate(text.at(i).unicode())) {
             ++count;
         }
     }
@@ -315,10 +315,10 @@ qsizetype codePointCount(const QString& text)
 
 uint codePointAt(const QString& text, qsizetype index, qsizetype& width)
 {
-    if (index + 1 < text.size() && QChar::isHighSurrogate(text.at(index))
-        && QChar::isLowSurrogate(text.at(index + 1))) {
+    if (index + 1 < text.size() && QChar::isHighSurrogate(text.at(index).unicode())
+        && QChar::isLowSurrogate(text.at(index + 1).unicode())) {
         width = 2;
-        return QChar::surrogateToUcs4(text.at(index), text.at(index + 1));
+        return QChar::surrogateToUcs4(text.at(index).unicode(), text.at(index + 1).unicode());
     }
     width = 1;
     return text.at(index).unicode();
@@ -326,20 +326,20 @@ uint codePointAt(const QString& text, qsizetype index, qsizetype& width)
 
 QString ucs4(std::initializer_list<uint> codePoints)
 {
-    QVector<qchar32_t> units;
+    QVector<char32_t> units;
     units.reserve(qsizetype(codePoints.size()));
     for (const uint codePoint : codePoints) {
-        units.append(qchar32_t(codePoint));
+        units.append(char32_t(codePoint));
     }
     return QString::fromUcs4(units.constData(), units.size());
 }
 
 QString ucs4(const QVector<uint>& codePoints)
 {
-    QVector<qchar32_t> units;
+    QVector<char32_t> units;
     units.reserve(codePoints.size());
     for (const uint codePoint : codePoints) {
-        units.append(qchar32_t(codePoint));
+        units.append(char32_t(codePoint));
     }
     return QString::fromUcs4(units.constData(), units.size());
 }
@@ -380,9 +380,11 @@ QString toAsciiLower(const QString& text)
 
 const QRegularExpression& uriRegex()
 {
+    // 普通字面量 + 双反斜杠；这里的模式没有需要转义的引号。
     static const QRegularExpression re(
         QStringLiteral(
-            R"re((?i)\b((?:ss|vmess|vless|trojan|hysteria2|hy2|wireguard|wg|socks5|socks|http|https)://[^\s<>'\]\)]+))re)"),
+            "(?i)\\b((?:ss|vmess|vless|trojan|hysteria2|hy2|wireguard|wg|socks5|socks|http|https)"
+            "://[^\\s<>'\\]\\)]+)"),
         QRegularExpression::UseUnicodePropertiesOption);
     return re;
 }
@@ -391,7 +393,7 @@ const QRegularExpression& lineUriRegex()
 {
     static const QRegularExpression re(
         QStringLiteral(
-            R"re((?i)^(ss|vmess|vless|trojan|hysteria2|hy2|wireguard|wg|socks5|socks)://\S+)re)"),
+            "(?i)^(ss|vmess|vless|trojan|hysteria2|hy2|wireguard|wg|socks5|socks)://\\S+"),
         QRegularExpression::UseUnicodePropertiesOption);
     return re;
 }
@@ -640,7 +642,7 @@ std::optional<UserinfoHostPort> splitUserinfoHostPort(const QString& text)
         return std::nullopt;
     }
     int port = 0;
-    if (!parseU16(hostPort->port, port)) {
+    if (!parsePortNumber(hostPort->port, port)) {
         return std::nullopt;
     }
     return UserinfoHostPort{stripped.left(at), hostPort->host, port};
@@ -695,7 +697,7 @@ std::optional<Authority> parseAuthority(const QString& uri)
         return std::nullopt;
     }
     int port = 0;
-    if (!parseU16(hostPort->port, port)) {
+    if (!parsePortNumber(hostPort->port, port)) {
         return std::nullopt;
     }
     return Authority{toAsciiLower(normalized.left(schemeEnd)), percentDecode(rest.left(at)), port,

@@ -97,9 +97,9 @@ Json yamlToValue(const YAML::Node& node)
     }
     case YAML::NodeType::Map: {
         Json object = Json::object();
-        for (const auto& pair : node.as<YAML::ConstMapNode>()) {
-            object[QString::fromStdString(pair.first.as<std::string>()).toStdString()] =
-                yamlToValue(pair.second);
+        for (YAML::const_iterator it = node.begin(); it != node.end(); ++it) {
+            object[QString::fromStdString(it->first.as<std::string>()).toStdString()] =
+                yamlToValue(it->second);
         }
         return object;
     }

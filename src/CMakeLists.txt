@@ -93,6 +93,9 @@ vcc_target_options(vccKernel)
 add_library(vccProxy STATIC
     proxy/ConfigTypes.cpp
     proxy/MihomoConfig.cpp
+    proxy/WorkDir.cpp
+    proxy/Diagnostics.cpp
+    proxy/SystemProxySession.cpp
 )
 
 target_include_directories(vccProxy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -101,10 +104,26 @@ target_link_libraries(vccProxy PUBLIC
     vccCore
     vccModels
     vccKernel
+    vccSysProxy
+    vccNet
     yaml-cpp::yaml-cpp
 )
 
 vcc_target_options(vccProxy)
+
+add_library(vccNet STATIC
+    net/HttpClient.cpp
+)
+
+target_include_directories(vccNet PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(vccNet PUBLIC
+    vccCore
+    Qt6::Core
+    Qt6::Network
+)
+
+vcc_target_options(vccNet)
 
 add_library(vccSysProxy STATIC
     sysproxy/RegRunner.cpp
@@ -149,3 +168,13 @@ qt_add_executable(vcc
 target_link_libraries(vcc PRIVATE vccApp)
 
 set_target_properties(vcc PROPERTIES WIN32_EXECUTABLE TRUE)
+
+add_library(vccExport STATIC
+    export/ClashProxy.cpp
+    export/UriExport.cpp
+    export/ClashYamlExport.cpp
+    export/QualityExport.cpp
+)
+target_include_directories(vccExport PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(vccExport PUBLIC vccCore vccModels Qt6::Core Qt6::Network yaml-cpp::yaml-cpp)
+vcc_target_options(vccExport)
