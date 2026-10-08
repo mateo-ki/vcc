@@ -34,7 +34,11 @@ target_link_libraries(vccModels PUBLIC
 vcc_target_options(vccModels)
 
 add_library(vccParser STATIC
+    parser/Common.cpp
+    parser/Clash.cpp
     parser/Fingerprint.cpp
+    parser/Subscription.cpp
+    parser/Uri.cpp
 )
 
 target_include_directories(vccParser PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -101,6 +105,26 @@ target_link_libraries(vccProxy PUBLIC
 )
 
 vcc_target_options(vccProxy)
+
+add_library(vccSysProxy STATIC
+    sysproxy/RegRunner.cpp
+    sysproxy/Messages.cpp
+    sysproxy/SystemProxy.cpp
+    sysproxy/TerminalProxy.cpp
+)
+
+target_include_directories(vccSysProxy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(vccSysProxy PUBLIC
+    vccCore
+    Qt6::Core
+)
+
+if(WIN32)
+    target_link_libraries(vccSysProxy PUBLIC wininet user32)
+endif()
+
+vcc_target_options(vccSysProxy)
 
 add_library(vccApp STATIC
     app/MainWindow.cpp

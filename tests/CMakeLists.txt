@@ -21,6 +21,24 @@ vcc_target_options(vccCoreTests)
 
 add_test(NAME vccCoreTests COMMAND vccCoreTests)
 
+qt_add_executable(vccSysProxyTests
+    sysproxy/SystemProxyTests.cpp
+)
+
+target_include_directories(vccSysProxyTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+target_link_libraries(vccSysProxyTests PRIVATE
+    vccSysProxy
+    vccCore
+    Qt6::Core
+    GTest::gtest
+    GTest::gtest_main
+)
+
+vcc_target_options(vccSysProxyTests)
+
+add_test(NAME vccSysProxyTests COMMAND vccSysProxyTests)
+
 qt_add_executable(vccProxyTests
     proxy/ConfigTypesTests.cpp
 )
@@ -39,6 +57,26 @@ target_link_libraries(vccProxyTests PRIVATE
 vcc_target_options(vccProxyTests)
 
 add_test(NAME vccProxyTests COMMAND vccProxyTests)
+
+qt_add_executable(vccDbTelemetryTests
+    db/TelemetryExportTests.cpp
+)
+
+target_include_directories(vccDbTelemetryTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+target_link_libraries(vccDbTelemetryTests PRIVATE
+    vccDb
+    vccParser
+    vccCore
+    vccModels
+    Qt6::Core
+    GTest::gtest
+    GTest::gtest_main
+)
+
+vcc_target_options(vccDbTelemetryTests)
+
+add_test(NAME vccDbTelemetryTests COMMAND vccDbTelemetryTests)
 
 qt_add_executable(vccDbTests
     db/DatabaseTests.cpp

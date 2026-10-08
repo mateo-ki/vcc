@@ -4,8 +4,7 @@
 #include <QChar>
 #include <QDate>
 #include <QSet>
-
-#include <initializer_list>
+#include <QStringView>
 
 #include "core/Encoding.h"
 
@@ -37,7 +36,7 @@ std::optional<QByteArray> decodeWithEngine(const QByteArray& text, Engine4 engin
     }
     case Engine4::StandardNoPad: {
         // STANDARD_NO_PAD：字母表同 STANDARD，但出现任何 '=' 填充即报错。
-        // 补齐成 4 的倍数再交给严格引擎，残余比特与 len%4==1 的判定完全一致。
+        // 补齐成 4 的倍数再交给严格引擎，残余比特与 len%4==1 的判定都一致。
         if (text.contains('=')) {
             return std::nullopt;
         }
@@ -51,7 +50,7 @@ std::optional<QByteArray> decodeWithEngine(const QByteArray& text, Engine4 engin
         return decodeWithEngine(padded, Engine4::Standard);
     }
     case Engine4::UrlSafe: {
-        // URL_SAFE 的字母表是 A-Za-z0-9-_，'+' 与 '/' 是非法字符；换表后即 STANDARD。
+        // URL_SAFE 的字母表是 A-Za-z0-9-_，'+' 与 '/' 属于非法字符；换表后即 STANDARD。
         if (text.contains('+') || text.contains('/')) {
             return std::nullopt;
         }
@@ -68,38 +67,30 @@ std::optional<QByteArray> decodeWithEngine(const QByteArray& text, Engine4 engin
     return std::nullopt;
 }
 
-bool isAsciiDigit(char ch)
+bool isAsciiDigit(QChar ch)
+{
+    return ch.unicode() >= u'0' && ch.unicode() <= u'9';
+}
+
+bool isAsciiDigitByte(char ch)
 {
     return ch >= '0' && ch <= '9';
 }
 
 bool isAsciiHex(char ch)
 {
-    return isAsciiDigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+    return isAsciiDigitByte(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
 }
 
 bool isAsciiAlnum(char ch)
 {
-    return isAsciiDigit(ch) || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
-}
-
-/// 取 index 处的码点，width 返回它占用的 UTF-16 单元数。
-uint codePointAt(const QString& text, qsizetype index, qsizetype& width)
-{
-    if (index + 1 < text.size() && QChar::isHighSurrogate(text.at(index))
-        && QChar::isLowSurrogate(text.at(index + 1))) {
-        width = 2;
-        return QChar::surrogateToUcs4(text.at(index), text.at(index + 1));
-    }
-    width = 1;
-    return text.at(index).unicode();
+    return isAsciiDigitByte(ch) || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
 }
 
 /// Rust `str::parse::<u16>()`：允许一个前导 '+'，之后必须全是 ASCII 数字且不溢出。
-bool parseU16(const QString& text, int& out)
+bool parsePortNumberImpl(const QString& text, int& out)
 {
-    QStringView view = QStringView(text).trimmed();
-    view = QStringView(text);
+    const QStringView view(text);
     qsizetype start = 0;
     if (!view.isEmpty() && view.at(0) == QLatin1Char('+')) {
         start = 1;
@@ -110,7 +101,7 @@ bool parseU16(const QString& text, int& out)
     quint64 value = 0;
     for (qsizetype i = start; i < view.size(); ++i) {
         const QChar ch = view.at(i);
-        if (!(ch.unicode() >= u'0' && ch.unicode() <= u'9')) {
+        if (!isAsciiDigit(ch)) {
             return false;
         }
         value = value * 10u + quint64(ch.unicode() - u'0');
@@ -122,9 +113,9 @@ bool parseU16(const QString& text, int& out)
     return true;
 }
 
-/// UTF-8 解码。Rust 的 `from_utf8` / `from_utf8_lossy` 按"最大合法子集"规则处理坏序列
-/// （一个坏序列只产出一个 U+FFFD，并从断链的那个字节重新起算），而 Qt 的 fromUtf8
-/// 对 overlong 等坏序列的处理不同，所以这里自己实现，保证与 Rust 逐字符一致。
+/// UTF-8 解码。Rust 的 `from_utf8` / `from_utf8_lossy` 按“最大合法子集”规则处理坏序列
+/// （一段坏只产出一个 U+FFFD，并从断链的那个字节重新起算），而 Qt 的 fromUtf8 对 overlong、
+/// 孤立代理等坏序列的处理不一样，所以这里自己实现，保证与 Rust 逐字符一致。
 QString decodeUtf8(const QByteArray& bytes, bool lossy, bool& ok)
 {
     ok = true;
@@ -172,20 +163,13 @@ QString decodeUtf8(const QByteArray& bytes, bool lossy, bool& ok)
             continue;
         }
 
-        uint codePoint = 0;
-        if (need == 2) {
-            codePoint = uint(b0 & 0x1F);
-        } else if (need == 3) {
-            codePoint = uint(b0 & 0x0F);
-        } else {
-            codePoint = uint(b0 & 0x07);
-        }
-
+        uint codePoint = need == 2 ? uint(b0 & 0x1F) : (need == 3 ? uint(b0 & 0x0F)
+                                                                   : uint(b0 & 0x07));
         qsizetype consumed = 1;
         bool broken = false;
         for (; consumed < need; ++consumed) {
             if (i + consumed >= size) {
-                break; // 截断
+                break; // 尾部截断
             }
             const uchar next = uchar(bytes.at(i + consumed));
             const uchar lo = consumed == 1 ? low : uchar(0x80);
@@ -198,7 +182,7 @@ QString decodeUtf8(const QByteArray& bytes, bool lossy, bool& ok)
         }
 
         if (!broken && consumed == need) {
-            if (codePoint > 0xFFFF) {
+            if (codePoint > 0xFFFFu) {
                 out.append(QChar::highSurrogate(qchar32_t(codePoint)));
                 out.append(QChar::lowSurrogate(qchar32_t(codePoint)));
             } else {
@@ -212,7 +196,7 @@ QString decodeUtf8(const QByteArray& bytes, bool lossy, bool& ok)
             return QString();
         }
         out.append(kReplacement);
-        // 坏序列只在第 consumed 字节处断链时，从那个字节继续；整段截断则直接结束。
+        // 断链就停在坏字节上；整段截断则一次吞掉剩余字节。
         i += broken ? consumed : size;
     }
     return out;
@@ -229,58 +213,65 @@ std::optional<QString> fromUtf8Strict(const QByteArray& bytes)
     return text;
 }
 
+/// Rust 的 `chars().filter(|c| !c.is_whitespace()).collect::<String>()`（UTF-8 字节）。
 QByteArray stripWhitespace(const QString& text)
 {
-    QByteArray out;
-    out.reserve(text.size());
+    QString kept;
+    kept.reserve(text.size());
     for (const QChar ch : text) {
-        if (!Common::isUnicodeSpace(ch)) {
-            const QByteArray unit = QString(ch).toUtf8();
-            // 代理对拆开会写出半个码点，这里按码点遍历更稳妥。
-            out.append(unit);
+        if (!isUnicodeSpace(ch)) {
+            kept.append(ch);
         }
     }
-    return out;
-}
-
-QStringList htmlEntityPairs()
-{
-    // 顺序不能改：Rust 是先 &amp; 再 &amp，所以 "&amp;amp;" 会变成 "&;"。
-    return {QStringLiteral("&amp;"), QStringLiteral("&"), QStringLiteral("&amp"),
-            QStringLiteral("&"),      QStringLiteral("&lt;"), QStringLiteral("<"),
-            QStringLiteral("&gt;"),   QStringLiteral(">"),    QStringLiteral("&quot;"),
-            QStringLiteral("\""),     QStringLiteral("&#39;"), QStringLiteral("'"),
-            QStringLiteral("&apos;"), QStringLiteral("'")};
+    return kept.toUtf8();
 }
 
 void decodeHtmlEntities(QString& text)
 {
-    const QStringList table = htmlEntityPairs();
-    for (qsizetype i = 0; i + 1 < table.size(); i += 2) {
-        text.replace(table.at(i), table.at(i + 1));
-    }
+    // 顺序不能改：先 &amp; 再 &amp，所以 "&amp;amp;" 在 Rust 里会变成 "&;"。
+    text.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+    text.replace(QStringLiteral("&amp"), QStringLiteral("&"));
+    text.replace(QStringLiteral("&lt;"), QStringLiteral("<"));
+    text.replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+    text.replace(QStringLiteral("&quot;"), QStringLiteral("\""));
+    text.replace(QStringLiteral("&#39;"), QStringLiteral("'"));
+    text.replace(QStringLiteral("&apos;"), QStringLiteral("'"));
 }
 
-/// url crate 的 USERINFO 集（= CONTROLS + 这些 ASCII 字符）；码位 >=128 一律不编码。
-bool isUserinfoEncoded(uchar ch)
+/// url crate 的 USERINFO 集：CONTROLS(0x00-0x1F、0x7F) + " <>`#?{}/:;=@[\]^| 这些 ASCII 字符。
+/// 百分号本身不在这个集合里，所以 Rust 不会把原文的 '%' 编成 %25 —— 这与 percentDecode
+/// 的往返行为一致，Uri 侧才可以直接对原文片段做解码。
+bool isUserinfoEncoded(ushort ch)
 {
     if (ch <= 0x1F || ch == 0x7F) {
         return true;
     }
-    static const char kChars[] = " \"<>`#?{}/:;=@[\\]^|";
-    for (const char* p = kChars; *p != '\0'; ++p) {
-        if (ch == uchar(*p)) {
-            return true;
-        }
+    switch (ch) {
+    case u' ':
+    case u'"':
+    case u'<':
+    case u'>':
+    case u'`':
+    case u'#':
+    case u'?':
+    case u'{':
+    case u'}':
+    case u'/':
+    case u':':
+    case u';':
+    case u'=':
+    case u'@':
+    case u'[':
+    case u'\\':
+    case u']':
+    case u'^':
+    case u'|':
+        return true;
+    default:
+        return false;
     }
-    return false;
 }
 
-} // namespace
-
-namespace {
-
-// 前向声明用不上的东西都放这里，避免污染头文件。
 QString trimTrailingPunct(QString uri)
 {
     static const QString kPunct = QStringLiteral(")]>,;.\"'");
@@ -290,6 +281,20 @@ QString trimTrailingPunct(QString uri)
     return uri;
 }
 
+QString stripLeadingZeros(const QString& text)
+{
+    QString out = text;
+    while (!out.isEmpty() && out.at(0) == QLatin1Char('0')) {
+        out.remove(0, 1);
+    }
+    return out;
+}
+
+QString appendUriMatch(const QRegularExpressionMatch& match)
+{
+    return normalizeUri(match.captured(1));
+}
+
 } // namespace
 
 qsizetype utf8Length(const QString& text)
@@ -297,9 +302,56 @@ qsizetype utf8Length(const QString& text)
     return text.toUtf8().size();
 }
 
+qsizetype codePointCount(const QString& text)
+{
+    qsizetype count = 0;
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        if (!QChar::isLowSurrogate(text.at(i))) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+uint codePointAt(const QString& text, qsizetype index, qsizetype& width)
+{
+    if (index + 1 < text.size() && QChar::isHighSurrogate(text.at(index))
+        && QChar::isLowSurrogate(text.at(index + 1))) {
+        width = 2;
+        return QChar::surrogateToUcs4(text.at(index), text.at(index + 1));
+    }
+    width = 1;
+    return text.at(index).unicode();
+}
+
+QString ucs4(std::initializer_list<uint> codePoints)
+{
+    QVector<qchar32_t> units;
+    units.reserve(qsizetype(codePoints.size()));
+    for (const uint codePoint : codePoints) {
+        units.append(qchar32_t(codePoint));
+    }
+    return QString::fromUcs4(units.constData(), units.size());
+}
+
+QString ucs4(const QVector<uint>& codePoints)
+{
+    QVector<qchar32_t> units;
+    units.reserve(codePoints.size());
+    for (const uint codePoint : codePoints) {
+        units.append(qchar32_t(codePoint));
+    }
+    return QString::fromUcs4(units.constData(), units.size());
+}
+
+bool parsePortNumber(const QString& text, int& out)
+{
+    return parsePortNumberImpl(text, out);
+}
+
 bool isUnicodeSpace(QChar ch)
 {
-    // Rust 的 char::is_whitespace == Unicode White_Space 属性。
+    // 等价于 Rust 的 char::is_whitespace（Unicode White_Space 属性）。
     switch (ch.category()) {
     case QChar::Separator_Space:
     case QChar::Separator_Line:
@@ -316,11 +368,11 @@ bool isUnicodeSpace(QChar ch)
 
 QString toAsciiLower(const QString& text)
 {
-    // Rust 的 to_ascii_lowercase 只处理 A-Z，非 ASCII 原样保留（不能用 toLower()）。
+    // Rust 的 to_ascii_lowercase 只动 A-Z，非 ASCII 原样保留，不能换成 toLower()。
     QString out = text;
     for (QChar& ch : out) {
         if (ch.unicode() >= u'A' && ch.unicode() <= u'Z') {
-            ch = QChar(ch.unicode() + 32);
+            ch = QChar(ushort(ch.unicode() + 32));
         }
     }
     return out;
@@ -328,11 +380,9 @@ QString toAsciiLower(const QString& text)
 
 const QRegularExpression& uriRegex()
 {
-    static const QRegularExpression pattern(QRegularExpression::anchoredPattern(QString()),
-                                            QRegularExpression::UseUnicodePropertiesOption);
-    Q_UNUSED(pattern);
     static const QRegularExpression re(
-        QStringLiteral(R"re((?i)\b(?:(?:ss|vmess|vless|trojan|hysteria2|hy2|wireguard|wg|socks5|socks|http|https)://)[^\s<>'\]\)]+)re)"),
+        QStringLiteral(
+            R"re((?i)\b((?:ss|vmess|vless|trojan|hysteria2|hy2|wireguard|wg|socks5|socks|http|https)://[^\s<>'\]\)]+))re)"),
         QRegularExpression::UseUnicodePropertiesOption);
     return re;
 }
@@ -340,24 +390,23 @@ const QRegularExpression& uriRegex()
 const QRegularExpression& lineUriRegex()
 {
     static const QRegularExpression re(
-        QStringLiteral(R"re((?i)^(?:ss|vmess|vless|trojan|hysteria2|hy2|wireguard|wg|socks5|socks)://\S+)re)"),
+        QStringLiteral(
+            R"re((?i)^(ss|vmess|vless|trojan|hysteria2|hy2|wireguard|wg|socks5|socks)://\S+)re)"),
         QRegularExpression::UseUnicodePropertiesOption);
     return re;
 }
 
 QString expandUrlTemplate(const QString& text)
 {
-    // Rust 用 chrono::Local::now()，即本地日期而不是 UTC。
+    // Rust 用 chrono::Local::now()，是本地日期而不是 UTC。
     const QDate today = QDate::currentDate();
     const QString y = QStringLiteral("%1").arg(today.year(), 4, 10, QLatin1Char('0'));
     const QString m = QStringLiteral("%1").arg(today.month(), 2, 10, QLatin1Char('0'));
     const QString d = QStringLiteral("%1").arg(today.day(), 2, 10, QLatin1Char('0'));
     const QString ymd = y + m + d;
     const QString ymdShort = y.right(2) + m + d;
-    QString mNoZero = m;
-    mNoZero.remove(QRegularExpression(QStringLiteral("^0+")));
-    QString dNoZero = d;
-    dNoZero.remove(QRegularExpression(QStringLiteral("^0+")));
+    const QString mNoZero = stripLeadingZeros(m);
+    const QString dNoZero = stripLeadingZeros(d);
     const QString mShort = mNoZero.isEmpty() ? QStringLiteral("0") : mNoZero;
     const QString dShort = dNoZero.isEmpty() ? QStringLiteral("0") : dNoZero;
 
@@ -385,7 +434,7 @@ QString normalizeUri(const QString& uri)
 {
     QString s = uri.trimmed();
     decodeHtmlEntities(s);
-    // Rust 判的是 UTF-8 字节长度，但 '<' '>' 都是单字节，两种长度在这里等价。
+    // Rust 判的是 UTF-8 字节长度；'<' '>' 是单字节，两种长度在这里等价。
     while (s.startsWith(QLatin1Char('<')) && s.endsWith(QLatin1Char('>')) && s.size() > 2) {
         s = s.mid(1, s.size() - 2);
     }
@@ -404,8 +453,7 @@ std::optional<QString> decodeMaybeBase64(const QString& input)
             ++okCount;
         }
     }
-    // Rust 用 char 计数除以 len()（UTF-8 字节数）；这里 cleaned 已是按字节过滤后的结果，
-    // 非 ASCII 会让占比下降，与 Rust 的行为一致。
+    // Rust 分子按 char 计数、分母是 UTF-8 字节数；白名单字符都是单字节，两者在这里等价。
     const float ratio = float(okCount) / float(cleaned.size());
     if (ratio < 0.95f) {
         return std::nullopt;
@@ -424,8 +472,8 @@ std::optional<QString> decodeMaybeBase64(const QString& input)
         for (qsizetype i = 0; i < text->size();) {
             qsizetype width = 1;
             const uint cp = codePointAt(*text, i, width);
-            // Rust 的 char::is_control()（Cc）：C0、DEL、C1。
-            const bool control = (cp <= 0x1F) || (cp >= 0x7F && cp <= 0x9F);
+            // Rust 的 char::is_control()（General_Category=Cc）：C0、DEL、C1。
+            const bool control = (cp <= 0x1Fu) || (cp >= 0x7Fu && cp <= 0x9Fu);
             if (control && cp != u'\n' && cp != u'\r' && cp != u'\t') {
                 printable = false;
                 break;
@@ -446,7 +494,8 @@ std::optional<QString> decodeBase64Str(const QString& input)
     while (padded.size() % 4 != 0) {
         padded.append('=');
     }
-    for (const QByteArray& candidate : {cleaned, padded}) {
+    const QByteArray candidates[2] = {cleaned, padded};
+    for (const QByteArray& candidate : candidates) {
         for (const Engine4 engine : kEngineOrder) {
             const std::optional<QByteArray> bytes = decodeWithEngine(candidate, engine);
             if (!bytes.has_value()) {
@@ -473,6 +522,7 @@ QStringList extractUris(const QString& content)
         if (line.isEmpty() || line.startsWith(QLatin1Char('#'))) {
             continue;
         }
+        // 纯订阅导出优先整行吃掉，避免行内噪声把链接切碎。
         const QRegularExpressionMatch whole = lineUriRegex().match(line);
         if (whole.hasMatch()) {
             const QString uri = normalizeUri(whole.captured(0));
@@ -482,18 +532,9 @@ QStringList extractUris(const QString& content)
             }
             continue;
         }
-        QRegularExpression::MatchedLength length = 0;
-        QRegularExpression::MatchOptions options;
-        Q_UNUSED(length);
-        Q_UNUSED(options);
         auto matches = uriRegex().globalMatch(line);
         while (matches.hasNext()) {
-            const QRegularExpressionMatch cap = matches.next();
-            const QString target = cap.captured(1);
-            if (target.isEmpty()) {
-                continue;
-            }
-            const QString uri = normalizeUri(target);
+            const QString uri = appendUriMatch(matches.next());
             if (!seen.contains(uri)) {
                 seen.insert(uri);
                 out.append(uri);
@@ -504,12 +545,7 @@ QStringList extractUris(const QString& content)
     if (out.isEmpty()) {
         auto matches = uriRegex().globalMatch(text);
         while (matches.hasNext()) {
-            const QRegularExpressionMatch cap = matches.next();
-            const QString target = cap.captured(1);
-            if (target.isEmpty()) {
-                continue;
-            }
-            const QString uri = normalizeUri(target);
+            const QString uri = appendUriMatch(matches.next());
             if (!seen.contains(uri)) {
                 seen.insert(uri);
                 out.append(uri);
@@ -542,17 +578,17 @@ QString percentDecode(const QString& text)
 QString encodeUserinfo(const QString& text)
 {
     static const char* kHex = "0123456789ABCDEF";
-    const QByteArray input = text.toUtf8();
     QString out;
-    out.reserve(input.size());
-    for (const char ch : input) {
-        const uchar value = uchar(ch);
-        if (isUserinfoEncoded(value)) {
+    out.reserve(text.size());
+    for (const QChar ch : text) {
+        const ushort value = ch.unicode();
+        if (value < 0x80 && isUserinfoEncoded(value)) {
             out.append(QLatin1Char('%'));
             out.append(QLatin1Char(kHex[value >> 4]));
             out.append(QLatin1Char(kHex[value & 0x0F]));
         } else {
-            out.append(QChar::fromLatin1(char(value)));
+            // 非 ASCII 与 '%' 都不在 USERINFO 集里，Rust 原样保留。
+            out.append(ch);
         }
     }
     return out;
@@ -562,10 +598,7 @@ QString stripQueryFragment(const QString& text)
 {
     const int question = text.indexOf(QLatin1Char('?'));
     const int hash = text.indexOf(QLatin1Char('#'));
-    int cut = -1;
-    if (question >= 0) {
-        cut = question;
-    }
+    int cut = question;
     if (hash >= 0 && (cut < 0 || hash < cut)) {
         cut = hash;
     }
@@ -582,6 +615,7 @@ std::optional<HostPort> splitHostPort(const QString& text)
             return std::nullopt;
         }
         const QString after = rest.mid(close + 1);
+        // Rust: rest.strip_prefix(':')? —— ']' 后面不是 ':' 就整体失败。
         if (!after.startsWith(QLatin1Char(':'))) {
             return std::nullopt;
         }
@@ -621,6 +655,7 @@ QMap<QString, QString> parseQuery(const QString& query)
             continue;
         }
         const int equals = pair.indexOf(QLatin1Char('='));
+        // 键不做 percent_decode，与 Rust 一致（值才解）。
         const QString key = equals < 0 ? pair : pair.left(equals);
         const QString value = equals < 0 ? QString() : pair.mid(equals + 1);
         if (!key.isEmpty()) {
@@ -669,6 +704,7 @@ std::optional<Authority> parseAuthority(const QString& uri)
 
 bool looksLikeUuid(const QString& text)
 {
+    // Rust 判 UTF-8 字节长度 36，非 ASCII 会让长度对不上或十六进制检查失败。
     const QByteArray bytes = text.trimmed().toUtf8();
     if (bytes.size() != 36) {
         return false;

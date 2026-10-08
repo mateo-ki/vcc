@@ -4,7 +4,9 @@
 #include <QRegularExpression>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
+#include <initializer_list>
 #include <optional>
 
 // parser/common.rs：订阅文本/URI 的字符串级工具。uri.rs 与 mod.rs 都依赖这里，
@@ -76,10 +78,21 @@ bool looksLikeUuid(const QString& text);
 
 /// 只按 UTF-8 字节数（Rust 的 str::len()），用于复刻 `len() < 16` / `len() != 36` 这类判断。
 qsizetype utf8Length(const QString& text);
+/// 按码点计数，对应 Rust 的 `chars().count()`（UTF-16 单元数对 astral 字符会翻倍）。
+qsizetype codePointCount(const QString& text);
+/// 取 index 处的码点，width 带回它占用的 UTF-16 单元数；用于复刻 Rust 的 `chars()` 遍历。
+uint codePointAt(const QString& text, qsizetype index, qsizetype& width);
+/// 对应 Rust `str::parse::<u16>()`（允许前导 '+'，其余必须全为 ASCII 数字且不溢出）。
+bool parsePortNumber(const QString& text, int& out);
 /// Rust `char::is_whitespace`：按 Unicode White_Space 属性判断。
 bool isUnicodeSpace(QChar ch);
 /// Rust 的 `to_ascii_lowercase`：只动 A-Z，非 ASCII 原样保留。
 QString toAsciiLower(const QString& text);
+/// 由码点数组构造 QString。表里的 CJK/emoji 一律写码点，
+/// 因为源码里的字面量在转录时容易静默丢码位（尤其 astral 平面）。
+QString ucs4(std::initializer_list<uint> codePoints);
+/// 同上，供表里已经存成容器的码点序列使用。
+QString ucs4(const QVector<uint>& codePoints);
 
 } // namespace Common
 } // namespace Parser
