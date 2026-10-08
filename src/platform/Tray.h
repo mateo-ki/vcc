@@ -71,8 +71,11 @@ bool isTraySelectEvent(quint32 event);
 /// 于是按下弹的那层被抬起这一下顶掉，看起来就是"点了没反应"）。
 bool isTrayContextEvent(quint32 event);
 
-/// NOTIFYICONDATAW.szTip 只有 64 个字符位，末尾还要留一个 NUL。
-QString truncateTrayTip(const QString &text, int capacity = 63);
+/// NOTIFYICONDATAW.szTip 的可用字符数：数组长度减一（Rust 用的是 `szTip.len() - 1`，
+/// 现代 SDK 里 szTip 是 WCHAR[128]，所以这个值是 127，不是老文档里的 63）。
+int trayTipCapacity();
+/// 把提示文本截到 szTip 装得下的长度。
+QString truncateTrayTip(const QString &text, int capacity = trayTipCapacity());
 /// 托盘默认提示（Rust 写死的那条中文）。
 QString defaultTrayTooltip();
 
@@ -85,6 +88,11 @@ void notifyExistingInstance();
 /// "起线程"挪到 `start()`，因为构建/测试期间绝不允许往通知区域塞图标。
 class TrayHandle {
 public:
+    /// 内部状态（事件队列 / 更新队列 / 线程），定义在 Tray.cpp。
+    /// 之所以是 public：托盘线程的 wndproc 与 updater 线程都要碰它，
+    /// 那些是命名空间里的自由函数（Win32 回调不能是有捕获的 lambda）。
+    struct Private;
+
     TrayHandle();
     ~TrayHandle();
     TrayHandle(const TrayHandle &) = delete;

@@ -15,42 +15,89 @@ namespace Parser {
 
 namespace {
 
-/// serde_yaml 走的是 YAML core schema：plain scalar 会先解析成 null/bool/int/float，
-/// 解析不了才是 string。yaml-cpp 的 Node 不保留引号风格，所以被引号包住却长得像数字的
-/// 标量在这里会被当成数字（Rust 会当成字符串）；只影响 config 里该字段的 JSON 类型。
-Json scalarToValue(const YAML::Node& node)
+/// YAML core schema 的标量归类，与 serde_yaml 喂给 serde_json::Value 的结果一致：
+/// plain scalar 先试 null/bool/int/float，都不像才是字符串。
+enum class ScalarKind { Null, Bool, Int, Float, String };
+
+ScalarKind classifyScalar(const QString& text)
 {
-    const std::string text = node.Scalar();
-    const QString value = QString::fromStdString(text);
-
-    if (text.empty() || text == "~" || text == "null" || text == "Null" || text == "NULL") {
-        return Json();
+    if (text.isEmpty() || text == QLatin1String("~") || text == QLatin1String("null")
+        || text == QLatin1String("Null") || text == QLatin1String("NULL")) {
+        return ScalarKind::Null;
     }
-    if (text == "true" || text == "True" || text == "TRUE") {
-        return Json(true);
+    if (text == QLatin1String("true") || text == QLatin1String("True")
+        || text == QLatin1String("TRUE") || text == QLatin1String("false")
+        || text == QLatin1String("False") || text == QLatin1String("FALSE")) {
+        return ScalarKind::Bool;
     }
-    if (text == "false" || text == "False" || text == "FALSE") {
-        return Json(false);
-    }
-
     // 整数：[-+]?[0-9]+
-    bool isInteger = !value.isEmpty();
-    qsizetype digitStart = 0;
-    if (isInteger && (value.at(0) == QLatin1Char('-') || value.at(0) == QLatin1Char('+'))) {
-        digitStart = 1;
-    }
-    bool hasDigit = false;
-    for (qsizetype i = digitStart; i < value.size() && isInteger; ++i) {
-        const ushort u = value.at(i).unicode();
-        if (u >= u'0' && u <= u'9') {
-            hasDigit = true;
-        } else {
-            isInteger = false;
+    {
+        qsizetype i = 0;
+        if (!text.isEmpty() && (text.at(0) == QLatin1Char('-') || text.at(0) == QLatin1Char('+'))) {
+            i = 1;
+        }
+        bool digits = i < text.size();
+        for (; i < text.size(); ++i) {
+            const ushort u = text.at(i).unicode();
+            if (u < u'0' || u > u'9') {
+                digits = false;
+                break;
+            }
+        }
+        if (digits) {
+            return ScalarKind::Int;
         }
     }
-    if (isInteger && hasDigit) {
+    // 浮点：[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?
+    {
         bool ok = false;
-        if (value.at(0) != QLatin1Char('-')) {
+        const double value = text.toDouble(&ok);
+        Q_UNUSED(value);
+        if (ok && (text.contains(QLatin1Char('.')) || text.contains(QLatin1Char('e'))
+                   || text.contains(QLatin1Char('E')))) {
+            return ScalarKind::Float;
+        }
+    }
+    return ScalarKind::String;
+}
+
+/// yaml-cpp 的 Tag()：plain scalar 是 "?"（等着隐式解析），被引号包住或带非特定标签是 "!"。
+/// serde_yaml 里"带引号的标量"永远是字符串，所以用 Tag 把这条信息找回来，
+/// 避免 password: "123456" 被误判成数字。
+ScalarKind kindOfScalarNode(const YAML::Node& node, const QString& text)
+{
+    const std::string tag = node.Tag();
+    if (tag == "?" || tag.empty()) {
+        return classifyScalar(text);
+    }
+    if (tag == "!!bool" || tag == "tag:yaml.org,2002:bool") {
+        return ScalarKind::Bool;
+    }
+    if (tag == "!!int" || tag == "tag:yaml.org,2002:int") {
+        return ScalarKind::Int;
+    }
+    if (tag == "!!float" || tag == "tag:yaml.org,2002:float") {
+        return ScalarKind::Float;
+    }
+    if (tag == "!!null" || tag == "tag:yaml.org,2002:null") {
+        return ScalarKind::Null;
+    }
+    // "!"、"!!str" 或其它显式标签：按字符串处理。
+    return ScalarKind::String;
+}
+
+Json scalarToValue(const YAML::Node& node)
+{
+    const QString value = QString::fromStdString(node.Scalar());
+    switch (kindOfScalarNode(node, value)) {
+    case ScalarKind::Null:
+        return Json();
+    case ScalarKind::Bool:
+        return Json(value == QLatin1String("true") || value == QLatin1String("True")
+                    || value == QLatin1String("TRUE"));
+    case ScalarKind::Int: {
+        bool ok = false;
+        if (!value.isEmpty() && value.at(0) != QLatin1Char('-')) {
             const quint64 parsed = value.toULongLong(&ok);
             if (ok) {
                 return Json(parsed);
@@ -64,18 +111,13 @@ Json scalarToValue(const YAML::Node& node)
         // 超出 64 位范围：Rust 侧会报错，这里保守地留成字符串。
         return Json(value.toStdString());
     }
-
-    // 浮点：只在明显是小数/指数形式时转换。
-    if (value.contains(QLatin1Char('.')) || value.contains(QLatin1Char('e'))
-        || value.contains(QLatin1Char('E'))) {
+    case ScalarKind::Float: {
         bool ok = false;
         const double parsed = value.toDouble(&ok);
-        QChar head = value.at(0);
-        const bool numericLead = (head.unicode() >= u'0' && head.unicode() <= u'9')
-            || head == QLatin1Char('-') || head == QLatin1Char('+') || head == QLatin1Char('.');
-        if (ok && numericLead) {
-            return Json(parsed);
-        }
+        return ok ? Json(parsed) : Json(value.toStdString());
+    }
+    case ScalarKind::String:
+        return Json(value.toStdString());
     }
     return Json(value.toStdString());
 }
@@ -126,7 +168,8 @@ QString scalarToYaml(const Json& value)
     if (text.isEmpty()) {
         return QStringLiteral("\"\"");
     }
-    bool needsQuote = false;
+    // 会被再读成 null/bool/int/float 的字符串必须加引号（与 classifyScalar 同源判断）。
+    bool needsQuote = classifyScalar(text) != ScalarKind::String;
     const QByteArray utf8 = text.toUtf8();
     for (const char ch : utf8) {
         const unsigned char byte = unsigned(ch);
@@ -135,26 +178,6 @@ QString scalarToYaml(const Json& value)
             needsQuote = true;
             break;
         }
-    }
-    // 会被重新解析成别的类型的字符串必须引号化。
-    static const QStringList kReserved = {QStringLiteral("null"), QStringLiteral("~"),
-                                          QStringLiteral("true"), QStringLiteral("false"),
-                                          QStringLiteral("True"), QStringLiteral("False"),
-                                          QStringLiteral("yes"),  QStringLiteral("no")};
-    if (kReserved.contains(text)) {
-        needsQuote = true;
-    }
-    bool allDigits = true;
-    for (const QChar ch : text) {
-        const ushort u = ch.unicode();
-        if (!((u >= u'0' && u <= u'9') || (u == u'.' && allDigits) || (u == u'-' && text.at(0) == ch)
-              || (u == u'+' && text.at(0) == ch))) {
-            allDigits = false;
-            break;
-        }
-    }
-    if (allDigits) {
-        needsQuote = true;
     }
     if (text.startsWith(QLatin1Char(' ')) || text.endsWith(QLatin1Char(' '))) {
         needsQuote = true;
@@ -284,7 +307,7 @@ std::optional<QString> asText(const Json& value)
     return QString::fromStdString(value.get<std::string>());
 }
 
-/// `obj.get("port").and_then(|v| as_u64→u16 or as_str→parse)`，取不到就是 0。
+/// `obj.get("port").and_then(|v| as_u64→u16 or as_str→u16 parse)`，取不到就是 0（Rust 的 unwrap_or(0)）。
 int portFromValue(const Json& item)
 {
     const auto found = item.find("port");
@@ -299,20 +322,9 @@ int portFromValue(const Json& item)
     }
     if (const std::optional<QString> text = asText(*found)) {
         int port = 0;
-        if (QStringView(*text).size() > 0) {
-            bool ok = false;
-            const quint64 parsed = text->toULongLong(&ok);
-            if (ok && parsed <= quint64(65535) && !text->contains(QLatin1Char('-'))) {
-                port = int(parsed);
-                // Rust 的 u16 parse 不允许空格/加号之外的字符。
-                for (const QChar ch : *text) {
-                    const ushort u = ch.unicode();
-                    if (!(u >= u'0' && u <= u'9')) {
-                        return 0;
-                    }
-                }
-                return port;
-            }
+        // Rust 的 `str::parse::<u16>()`：只允许可选前导 '+' 加纯数字。
+        if (Common::parsePortNumber(*text, port)) {
+            return port;
         }
     }
     return 0;

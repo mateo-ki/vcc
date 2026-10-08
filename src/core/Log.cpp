@@ -37,13 +37,11 @@ bool appendLine(const QString &path, const QString &line)
     return true;
 }
 
-}
-
-namespace Log {
-
-void initialize()
+/// QMutex 不可重入：所有公开入口统一在这里加一次锁，内部函数一律用 *Locked 后缀
+/// 表示"调用方已持锁"。之前 initialize() 自己又加了一次锁，
+/// 于是 startup() 里惰性初始化会自死锁（第二次 migrate 打日志时就是这个现象）。
+void ensureInitializedLocked()
 {
-    QMutexLocker locker(&g_logMutex);
     if (g_initialized) {
         return;
     }
@@ -53,12 +51,20 @@ void initialize()
     g_logPath = appendLine(candidate, QString()) ? candidate : tempFallbackPath();
 }
 
+}
+
+namespace Log {
+
+void initialize()
+{
+    QMutexLocker locker(&g_logMutex);
+    ensureInitializedLocked();
+}
+
 QString logFilePath()
 {
     QMutexLocker locker(&g_logMutex);
-    if (g_logPath.isEmpty()) {
-        initialize();
-    }
+    ensureInitializedLocked();
     return g_logPath;
 }
 
@@ -74,9 +80,7 @@ void startup(const QString &message)
     const QString line =
         QStringLiteral("[%1] %2").arg(TimeUtil::formatUtcMillis(TimeUtil::nowUtcNanos()), message);
     QMutexLocker locker(&g_logMutex);
-    if (!g_initialized) {
-        initialize();
-    }
+    ensureInitializedLocked();
     if (!appendLine(g_logPath, line)) {
         const QString fallback = tempFallbackPath();
         if (fallback != g_logPath) {

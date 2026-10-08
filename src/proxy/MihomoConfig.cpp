@@ -5,12 +5,9 @@
 #include <initializer_list>
 
 #include "core/Log.h"
+#include "export/ClashProxy.h"
 #include "geo/GeoConstants.h"
 #include "proxy_probe/TestUrls.h"
-// nodes_to_clash_proxies 由 export 模块提供（并行移植中），这里只声明用到的签名。
-namespace Export {
-QVector<Json> nodesToClashProxies(const QVector<Models::Node> &nodes);
-}
 
 namespace Proxy {
 

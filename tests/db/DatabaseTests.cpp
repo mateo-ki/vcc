@@ -124,6 +124,8 @@ TEST(DatabaseSchema, FreshDatabaseHasEveryTableFromSchemaRs)
     EXPECT_TRUE(settingsLoaded.value().speedtestAddedSource);
 }
 
+/// 老库形状：raw/config 内联在 nodes 行里。迁移把载荷搬进 node_payloads，叶子页只剩
+/// 元数据，但读出来必须还是原样（COALESCE + LEFT JOIN node_payloads）。
 TEST(DatabaseSchema, NodePoolSplitsPayloadOutOfTheLeafPages)
 {
     QTemporaryDir directory;
@@ -133,37 +135,87 @@ TEST(DatabaseSchema, NodePoolSplitsPayloadOutOfTheLeafPages)
     ASSERT_TRUE(opened.isOk()) << opened.error().toStdString();
     auto database = opened.takeValue();
 
-    // 老库形状：raw/config 直接写在 nodes 行里。
+    const QString sourceId = QStringLiteral("11112222-3333-4444-5555-666677778888");
+    const QString shardPath = database->nodeDbPath(sourceId);
+    {
+        Result<std::shared_ptr<ConnectionPool>> raw = ConnectionPool::create(shardPath, 1);
+        ASSERT_TRUE(raw.isOk()) << raw.error().toStdString();
+        auto lease = raw.value()->acquire();
+        ASSERT_TRUE(lease->execute(QStringLiteral(
+            "CREATE TABLE nodes (id TEXT PRIMARY KEY NOT NULL, source_id TEXT,"
+            " protocol TEXT NOT NULL, name TEXT NOT NULL, server TEXT NOT NULL,"
+            " port INTEGER NOT NULL, raw TEXT NOT NULL DEFAULT '',"
+            " config TEXT NOT NULL DEFAULT '{}', country TEXT,"
+            " latency_ms INTEGER, latency_ok INTEGER, download_kbps REAL,"
+            " latency_kernel TEXT, latency_test_kind TEXT, latency_tested_at TEXT,"
+            " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")).isOk());
+        ASSERT_TRUE(lease
+                        ->execute(QStringLiteral("INSERT INTO nodes (id, source_id, protocol,"
+                                                  " name, server, port, raw, config, created_at,"
+                                                  " updated_at) VALUES ('n1','%1','ss','s',"
+                                                  " '1.2.3.4',443,'ss://a@b',"
+                                                  " '{\"cipher\":\"aes-256-gcm\"}',"
+                                                  " '2026-01-01T00:00:00+00:00',"
+                                                  " '2026-01-01T00:00:00+00:00')")
+                                      .arg(sourceId))
+                        .isOk());
+    }
+
+    const Result<QVector<Models::Node>> loaded = database->loadNodes(sourceId);
+    ASSERT_TRUE(loaded.isOk()) << loaded.error().toStdString();
+    ASSERT_EQ(loaded.value().size(), 1);
+    EXPECT_EQ(loaded.value().first().raw.toStdString(), std::string("ss://a@b"));
+    EXPECT_EQ(JsonUtil::dump(loaded.value().first().config).toStdString(),
+              std::string("{\"cipher\":\"aes-256-gcm\"}"));
+
+    Result<std::shared_ptr<ConnectionPool>> shard = database->openNodePool(sourceId);
+    ASSERT_TRUE(shard.isOk()) << shard.error().toStdString();
+    auto shardLease = shard.value()->acquire();
+    Result<Statement> check = shardLease->prepare(QStringLiteral(
+        "SELECT (SELECT raw FROM node_payloads WHERE node_id = 'n1') AS payload,"
+        "       (SELECT raw FROM nodes WHERE id = 'n1') AS leaf"));
+    ASSERT_TRUE(check.isOk()) << check.error().toStdString();
+    Statement row = check.takeValue();
+    ASSERT_TRUE(row.step().value());
+    EXPECT_EQ(row.text("payload").toStdString(), std::string("ss://a@b"));
+    EXPECT_EQ(row.text("leaf").toStdString(), std::string(""));
+}
+
+/// 老主库里的 nodes 行按 source_id 迁进分库，然后主库清空（Rust migrate_legacy_nodes）。
+TEST(DatabaseSchema, LegacyMainDbNodesMoveIntoShardsAndMainIsCleared)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const QString path = QDir(directory.path()).filePath(QStringLiteral("vpn-parser.db"));
+    Result<std::shared_ptr<Database>> opened = Database::connect(path);
+    ASSERT_TRUE(opened.isOk()) << opened.error().toStdString();
+    auto database = opened.takeValue();
+
     {
         auto lease = database->mainPool()->acquire();
-        ASSERT_TRUE(
-            lease->execute(QStringLiteral(
-                "INSERT INTO nodes (id, source_id, protocol, name, server, port, raw, config,"
-                " created_at, updated_at) VALUES ('legacy-1', NULL, 'ss', 'n', '1.2.3.4', 443,"
-                " 'ss://a@b', '{\"cipher\":\"aes-256-gcm\"}', '2026-01-01T00:00:00+00:00',"
-                " '2026-01-01T00:00:00+00:00')"))
-                .isOk());
+        ASSERT_TRUE(lease
+                        ->execute(QStringLiteral(
+                            "INSERT INTO nodes (id, source_id, protocol, name, server, port,"
+                            " raw, config, created_at, updated_at) VALUES ('legacy-1', NULL,"
+                            " 'ss', 'n', '1.2.3.4', 443, 'ss://a@b',"
+                            " '{\"cipher\":\"aes-256-gcm\"}', '2026-01-01T00:00:00+00:00',"
+                            " '2026-01-01T00:00:00+00:00')"))
+                        .isOk());
     }
     ASSERT_TRUE(database->migrate().isOk());
 
-    {
-        auto lease = database->mainPool()->acquire();
-        Result<Statement> prepared =
-            lease->prepare(QStringLiteral("SELECT raw, config FROM nodes WHERE id = 'legacy-1'"));
-        ASSERT_TRUE(prepared.isOk()) << prepared.error().toStdString();
-        Statement statement = prepared.takeValue();
-        ASSERT_TRUE(statement.step().value());
-        // 大字段被搬走，叶子页只剩元数据。
-        EXPECT_EQ(statement.text("raw").toStdString(), std::string(""));
-        EXPECT_EQ(statement.text("config").toStdString(), std::string("{}"));
-    }
+    auto lease = database->mainPool()->acquire();
+    Result<Statement> count = lease->prepare(QStringLiteral("SELECT COUNT(*) AS c FROM nodes"));
+    ASSERT_TRUE(count.isOk()) << count.error().toStdString();
+    Statement row = count.takeValue();
+    ASSERT_TRUE(row.step().value());
+    EXPECT_EQ(row.int64("c"), 0);
 
-    // 但读出来必须还是原样（COALESCE + node_payloads）。
-    const Result<Models::Node> node = database->getNode(QStringLiteral("legacy-1"));
-    ASSERT_TRUE(node.isOk()) << node.error().toStdString();
-    EXPECT_EQ(node.value().raw.toStdString(), std::string("ss://a@b"));
-    EXPECT_EQ(JsonUtil::dump(node.value().config).toStdString(),
-              std::string("{\"cipher\":\"aes-256-gcm\"}"));
+    const Result<QVector<Models::Node>> inShard = database->loadNodes(kUngroupedSourceId);
+    ASSERT_TRUE(inShard.isOk()) << inShard.error().toStdString();
+    ASSERT_EQ(inShard.value().size(), 1);
+    EXPECT_EQ(inShard.value().first().id.toStdString(), std::string("legacy-1"));
+    EXPECT_EQ(inShard.value().first().raw.toStdString(), std::string("ss://a@b"));
 }
 
 TEST(DatabaseSchema, UngroupedShardPathIsUsedForIllegalSourceIds)

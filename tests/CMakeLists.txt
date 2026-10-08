@@ -99,6 +99,46 @@ vcc_target_options(vccDbTests)
 
 add_test(NAME vccDbTests COMMAND vccDbTests)
 
+qt_add_executable(vccPlatformTests
+    platform/PlatformTests.cpp
+)
+
+target_include_directories(vccPlatformTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+target_link_libraries(vccPlatformTests PRIVATE
+    vccPlatform
+    vccCore
+    vccKernel
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    GTest::gtest
+    GTest::gtest_main
+)
+
+vcc_target_options(vccPlatformTests)
+
+add_test(NAME vccPlatformTests COMMAND vccPlatformTests)
+
+qt_add_executable(vccKernelManagerTests
+    kernel/KernelManagerTests.cpp
+)
+
+target_include_directories(vccKernelManagerTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+target_link_libraries(vccKernelManagerTests PRIVATE
+    vccKernelManager
+    vccKernel
+    vccCore
+    Qt6::Core
+    GTest::gtest
+    GTest::gtest_main
+)
+
+vcc_target_options(vccKernelManagerTests)
+
+add_test(NAME vccKernelManagerTests COMMAND vccKernelManagerTests)
+
 qt_add_executable(vccParserTests
     parser/ParserTests.cpp
 )

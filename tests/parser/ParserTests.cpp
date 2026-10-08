@@ -7,11 +7,13 @@
 
 #include <iostream>
 
+
 #include "core/Encoding.h"
 #include "core/JsonUtil.h"
 #include "models/Node.h"
 #include "parser/Common.h"
 #include "parser/Fingerprint.h"
+#include "parser/Clash.h"
 #include "parser/Subscription.h"
 #include "parser/Uri.h"
 
@@ -218,102 +220,5 @@ TEST(Parser, parse_solispirit_sample)
     EXPECT_GT(nodes.size(), 3500) << "deduped too low: " << int(nodes.size());
 }
 
-TEST(Scratch, PROBE_ONLY_DELETE_ME)
-{
-    // 临时探针：核对 config 的 JSON 字节序与 Clash YAML 路径，跑完就删。
-    {
-        const auto node = Parser::Uri::parseUri(
-            QStringLiteral("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@1.2.3.4:8388#test"), QString());
-        ASSERT_TRUE(node.has_value());
-        std::cerr << "SS  config=" << JsonUtil::dump(node->config).toStdString() << std::endl;
-        std::cerr << "SS  name=" << node->name.toStdString() << " country="
-                  << node->country.toStdString() << " raw=" << node->raw.toStdString() << std::endl;
-    }
-    {
-        const auto node = Parser::Uri::parseUri(
-            QStringLiteral("vless://a18f7c2d-9e45-4b8a-af3c-1d5e7f9c8b2a@83.168.71.216:443"
-                           "?security=reality&encryption=none&type=tcp&sni=ads.x5.ru#Join-Telegram"),
-            QString());
-        ASSERT_TRUE(node.has_value());
-        std::cerr << "VL  config=" << JsonUtil::dump(node->config).toStdString() << std::endl;
-    }
-    {
-        const auto node = Parser::Uri::parseUri(QStringLiteral("trojan://pwd@1.1.1.1:443?sni=a&allowInsecure=1#x"),
-                                                 QStringLiteral("src-1"));
-        ASSERT_TRUE(node.has_value());
-        std::cerr << "TR  config=" << JsonUtil::dump(node->config).toStdString() << std::endl;
-        std::cerr << "TR  sourceId=" << node->sourceId.toStdString() << " id="
-                  << node->id.toStdString() << " created=" << node->createdAt.toJsonText().toStdString()
-                  << std::endl;
-    }
-    {
-        const auto node = Parser::Uri::parseUri(QStringLiteral(
-            "vmess://W3siYWRkIjoiMS4yLjMuNCIsInBvcnQiOjQ0MywiYWlkIjoiMCIsImlkIjoiYWEiLCJuZXQiOiJ3cyIsInBzIjoiaG9tZSJ9XQ=="),
-            QString());
-        std::cerr << "VM  has=" << int(node.has_value());
-        if (node.has_value()) {
-            std::cerr << " config=" << JsonUtil::dump(node->config).toStdString()
-                      << " name=" << node->name.toStdString();
-        }
-        std::cerr << std::endl;
-    }
-    {
-        const auto node = Parser::Uri::parseUri(QStringLiteral("socks5://u1:p2@9.9.9.9:1080#s"), QString());
-        ASSERT_TRUE(node.has_value());
-        std::cerr << "SO  config=" << JsonUtil::dump(node->config).toStdString() << std::endl;
-    }
-    {
-        const auto node = Parser::Uri::parseUri(QStringLiteral("hy2://auth9@h.example:443?sni=s&obfs=xx#n"), QString());
-        ASSERT_TRUE(node.has_value());
-        std::cerr << "HY  config=" << JsonUtil::dump(node->config).toStdString()
-                  << " raw=" << node->raw.toStdString() << std::endl;
-    }
-    std::cerr << "TPL " << Parser::expandUrlTemplate(QStringLiteral("{Ymd}|{ymd}|{Y}|{mm}|{m}|{dd}|{d}"))
-                     .toStdString() << std::endl;
-    {
-        const QString yaml = QStringLiteral(
-            "proxies:\n"
-            "  - name: HK-01\n"
-            "    type: ss\n"
-            "    server: 1.2.3.4\n"
-            "    port: 8388\n"
-            "    cipher: aes-256-gcm\n"
-            "    password: \"p@ss\"\n"
-            "    udp: true\n"
-            "  - name: JP\n"
-            "    type: Vless\n"
-            "    server: 5.6.7.8\n"
-            "    port: 443\n"
-            "    uuid: abc\n"
-            "    client-fingerprint: chrome\n");
-        const Result<QVector<Models::Node>> result = Parser::parseClashYaml(yaml, QStringLiteral("s"));
-        ASSERT_TRUE(result.isOk()) << result.error().toStdString();
-        for (const Models::Node& node : result.value()) {
-            std::cerr << "CL  config=" << JsonUtil::dump(node.config).toStdString() << std::endl;
-            std::cerr << "CL  raw=[" << node.raw.toStdString() << "]" << std::endl;
-            std::cerr << "CL  protocol=" << node.protocol.toStdString() << " port=" << node.port
-                      << " name=" << node.name.toStdString() << std::endl;
-        }
-    }
-    {
-        const QString blob = QString::fromLatin1(Encoding::encode(
-            QByteArrayLiteral("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@1.2.3.4:8388#test\n"
-                              "trojan://pwd@1.1.1.1:443#tj"),
-            Encoding::Engine::Standard));
-        const QVector<Models::Node> nodes = Parser::parseSubscription(blob, QString());
-        std::cerr << "B64 nodes=" << int(nodes.size()) << std::endl;
-        for (const Models::Node& node : nodes) {
-            std::cerr << "B64  " << node.protocol.toStdString() << " " << node.server.toStdString()
-                      << ":" << node.port << " name=" << node.name.toStdString() << std::endl;
-        }
-    }
-    {
-        const QStringList uris = Parser::extractUris(QStringLiteral(
-            "some text ss://YWJj@1.1.1.1:8388#n more | vmess://AAA and https not a proxy"));
-        for (const QString& uri : uris) {
-            std::cerr << "EX  [" << uri.toStdString() << "]" << std::endl;
-        }
-    }
-}
 
 } // namespace

@@ -100,6 +100,9 @@ class Manager {
 public:
     Info infoForMissing(Kind kind) const;
     Info detect(Kind kind) const;
+    /// `detect` 的注入版：路径由调用方给定（nullopt = 没找到），这样测试不用真的去动
+    /// 用户机器上的内核目录，updater 探测暂存内核时也能复用同一套结论拼装。
+    Info detectAtPath(Kind kind, const std::optional<QString> &path) const;
     /// 顺序固定为 mihomo → xray → sing-box，和 Rust `detect_all` 一致。
     QList<Info> detectAll() const;
 };

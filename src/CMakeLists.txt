@@ -104,6 +104,7 @@ target_link_libraries(vccProxy PUBLIC
     vccCore
     vccModels
     vccKernel
+    vccExport
     vccSysProxy
     vccNet
     yaml-cpp::yaml-cpp
@@ -178,3 +179,29 @@ add_library(vccExport STATIC
 target_include_directories(vccExport PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vccExport PUBLIC vccCore vccModels Qt6::Core Qt6::Network yaml-cpp::yaml-cpp)
 vcc_target_options(vccExport)
+
+add_library(vccPlatform STATIC
+    platform/ProcessControl.cpp
+    platform/SingleInstance.cpp
+    platform/Firewall.cpp
+    platform/Tray.cpp
+    platform/WindowHelpers.cpp
+    platform/Messages.cpp
+)
+target_include_directories(vccPlatform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# vccSysProxy 只为复用 RegRunner 的 CREATE_NO_WINDOW 进程启动；vccKernel 提供内核 exe 名单。
+target_link_libraries(vccPlatform PUBLIC vccCore vccSysProxy vccKernel Qt6::Core Qt6::Gui Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(vccPlatform PUBLIC shell32 user32 advapi32 iphlpapi ole32 dwmapi gdi32)
+endif()
+vcc_target_options(vccPlatform)
+
+add_library(vccKernelManager STATIC
+    kernel/KernelManager.cpp
+    kernel/KernelMessages.cpp
+    kernel/KernelRelease.cpp
+    kernel/KernelSource.cpp
+)
+target_include_directories(vccKernelManager PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(vccKernelManager PUBLIC vccCore vccModels vccKernel Qt6::Core)
+vcc_target_options(vccKernelManager)
