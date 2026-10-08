@@ -3,3 +3,5 @@ dist/
 *.user
 .cache/
 vcpkg_installed/
+build*/
+dist*/

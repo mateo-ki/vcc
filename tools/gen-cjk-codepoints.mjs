@@ -14,6 +14,24 @@ const outputs = {
     ns: 'SysProxy::Messages',
     include: '#include "sysproxy/Messages.h"',
   },
+  geo: {
+    header: 'D:/project/cpp/vcc/src/geo/GeoMessages.h',
+    source: 'D:/project/cpp/vcc/src/geo/GeoMessages.cpp',
+    ns: 'Geo::Messages',
+    include: '#include "geo/GeoMessages.h"',
+  },
+  gui: {
+    header: 'D:/project/cpp/vcc/src/gui/ThemeNames.h',
+    source: 'D:/project/cpp/vcc/src/gui/ThemeNames.cpp',
+    ns: 'Gui::ThemeNames',
+    include: '#include "gui/ThemeNames.h"',
+  },
+  uitext: {
+    header: 'D:/project/cpp/vcc/src/gui/UiText.h',
+    source: 'D:/project/cpp/vcc/src/gui/UiText.cpp',
+    ns: 'Gui::UiText',
+    include: '#include "gui/UiText.h"',
+  },
 };
 
 const entries = [
@@ -32,6 +50,30 @@ const entries = [
   ['alreadyYours', 'system_proxy/terminal.rs', 'if !is_ours(&existing)', 0, 'nonAscii', 'sysproxy'],
   ['windowsOnly', 'system_proxy/terminal.rs', 'pub fn enable(_port: u16)', 0, 'nonAscii', 'sysproxy'],
   ['noProxyValue', 'system_proxy/terminal.rs', 'pub const NO_PROXY_VALUE', 0, 'any', 'sysproxy'],
+
+  // ---- geo.rs：分流数据库下载。半截库会让内核起不来，报错文案要一致。 ----
+  ['geoTruncated', 'geo.rs', 'if (bytes.len() as u64) < MIN_GEO_BYTES {', 0, 'nonAscii', 'geo'],
+  ['geoHtmlBody', 'geo.rs', 'if bytes.starts_with(b"<") {', 0, 'nonAscii', 'geo'],
+  ['geoBadMagic', 'geo.rs', 'if bytes[0] != 0x0a {', 0, 'nonAscii', 'geo'],
+  ['geoAlreadyReady', 'geo.rs', 'report.push(format!(', 0, 'nonAscii', 'geo'],
+  ['geoUpdated', 'geo.rs', 'report.push(format!(', 1, 'nonAscii', 'geo'],
+  ['geoAllSourcesFailed', 'geo.rs', 'if !done {', 0, 'nonAscii', 'geo'],
+  ['geoReadBodyFailed', 'geo.rs', 'Ok(body) => body,', 0, 'nonAscii', 'geo'],
+
+  // ---- gui/theme.rs：五套主题名，设置页直接显示。 ----
+  ['softCobalt', 'gui/theme.rs', 'Theme { id: "soft-cobalt"', 0, 'nonAscii', 'gui'],
+  ['softTeal', 'gui/theme.rs', 'Theme { id: "soft-teal"', 0, 'nonAscii', 'gui'],
+  ['softTerracotta', 'gui/theme.rs', 'Theme { id: "soft-terracotta"', 0, 'nonAscii', 'gui'],
+  ['softIndigo', 'gui/theme.rs', 'Theme { id: "soft-indigo"', 0, 'nonAscii', 'gui'],
+  ['softViolet', 'gui/theme.rs', 'Theme { id: "soft-violet"', 0, 'nonAscii', 'gui'],
+
+  // ---- gui/views/sidebar.rs：侧栏品牌行与五个导航项。 ----
+  ['brandSubtitle', 'gui/views/sidebar.rs', '.small().color(theme::sidebar_muted()));', 0, 'nonAscii', 'uitext'],
+  ['navConsole', 'gui/views/sidebar.rs', 'Tab::Proxy, Icon::', 0, 'nonAscii', 'uitext'],
+  ['navNodePool', 'gui/views/sidebar.rs', 'Tab::Nodes, Icon::', 0, 'nonAscii', 'uitext'],
+  ['navSubscriptions', 'gui/views/sidebar.rs', 'Tab::Sources, Icon::', 0, 'nonAscii', 'uitext'],
+  ['navSystemSettings', 'gui/views/sidebar.rs', 'Tab::Settings, Icon::', 0, 'nonAscii', 'uitext'],
+  ['navExternalApi', 'gui/views/sidebar.rs', 'Tab::Api, Icon::', 0, 'nonAscii', 'uitext'],
 
 ];
 

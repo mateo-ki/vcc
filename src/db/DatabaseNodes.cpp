@@ -1428,6 +1428,10 @@ Result<int> Database::writeSourceNodes(const QString &sourceId,
         QFile::remove(temporary);
         return Result<int>::withError(committed.error());
     }
+    // 把事务持有的连接立刻还给池子：tempPool 只有 1 个连接，而 Transaction 的 Lease
+    // 原本要等函数结束才析构，下面的 wal_checkpoint 再 acquire 就会永久阻塞在
+    // available_.wait() 上（Rust 侧 commit() 消费事务，连接当场归还，不会死锁）。
+    transaction = Transaction();
     {
         auto lease = tempPool.value()->acquire();
         const Status checkpoint = lease->execute(QStringLiteral("PRAGMA wal_checkpoint(TRUNCATE)"));

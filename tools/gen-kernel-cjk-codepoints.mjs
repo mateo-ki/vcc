@@ -9,7 +9,8 @@ import fs from 'node:fs';
 // 找到 0 个、多于 1 个或非 ASCII 模式下的纯 ASCII 都直接报错退出，绝不猜。
 const RUST = 'D:/project/rust/vs/vpn-parser/src';
 
-// [name, file, anchor, occurrence, offset, mode]
+// [name, file, anchor, occurrence, offset, mode, pick]
+// pick = 同一行里第几个非 ASCII 字面量；不给时要求该行恰好有 1 个。
 const entries = [
   // ---- kernel/mod.rs：选择内核与版本探测的错误 ----
   ['unsupportedProtocol', 'kernel/mod.rs', 'ok_or_else(|| anyhow::anyhow!("', 0, 0],
@@ -47,6 +48,72 @@ const entries = [
   ['sourceLocalHint', 'kernel/updater.rs', 'id: "local",', 0, 2],
   ['sourceLabelFallback', 'kernel/updater.rs', '.unwrap_or(', 1, 0],
   ['directTransport', 'kernel/updater.rs', 'let direct = transport_label ==', 0, 0],
+  // ---- kernel/updater.rs：下载/解压/安装流水线的进度文案与错误消息 ----
+  // 阶段进度（KernelUpdateProgress.message）与 anyhow 错误文本都会原样进界面，
+  // 所以下面这些必须与 Rust 逐字一致；锚点定位全部用 ASCII，中文由脚本自己抄。
+  ['transportAppProxyLabel', 'kernel/updater.rs', '{url}")', 0],
+  ['transportSystemProxyLabel', 'kernel/updater.rs', '{url}")', 1],
+  ['releaseAssetMissing', 'kernel/updater.rs', '{asset_name}"))?;', 0],
+  ['releaseUpdateAvailable', 'kernel/updater.rs', '{}", info.kind.display_name(), release.tag_name)', 0],
+  ['releaseUpToDate', 'kernel/updater.rs', '", info.kind.display_name())', 0],
+  ['localZipRequired', 'kernel/updater.rs', 'let path = local_file.ok_or_else(|| anyhow::anyhow!("', 0],
+  ['localFileReading', 'kernel/updater.rs', '{}", path.display()),', 0],
+  ['localFileReadFailed', 'kernel/updater.rs', ': {}", path.display()))?;', 0],
+  ['localArchiveSizeInvalid', 'kernel/updater.rs', ': {} bytes", bytes.len());', 0],
+  ['localDigestVerifying', 'kernel/updater.rs', 'SHA-256".into(),', 0],
+  ['localDigestSkipped', 'kernel/updater.rs', 'message: "', 1],
+  ['checkingOfficialRelease', 'kernel/updater.rs', 'Release', 6],
+  ['fallbackReleaseNotice', 'kernel/updater.rs', 'Release', 7],
+  ['logReleaseSource', 'kernel/updater.rs', '#{transport_index}",', 0],
+  ['logSourceBuiltinFallback', 'kernel/updater.rs', '" } else { "api.github.com/', 0, 0, 'nonAscii', 0],
+  ['logSourceApiOrCache', 'kernel/updater.rs', '" } else { "api.github.com/', 0, 0, 'nonAscii', 1],
+  ['logTargetAsset', 'kernel/updater.rs', '{} / {}', 0],
+  ['archiveSizeInvalid', 'kernel/updater.rs', ': {} bytes", asset.size);', 0],
+  ['logDownloadSizeMismatch', 'kernel/updater.rs', 'if bytes.len() as u64 != asset.size {', 0, 2],
+  ['downloadSizeMismatch', 'kernel/updater.rs', '{}", asset.size, bytes.len());', 0],
+  ['logDownloadComplete', 'kernel/updater.rs', 'SHA-256",', 1],
+  ['verifyingSha256', 'kernel/updater.rs', 'SHA-256".into(),', 1],
+  ['logVerifyError', 'kernel/updater.rs', '] {} {error}", kind.display_name()));', 0],
+  ['logSha256Passed', 'kernel/updater.rs', '] {} SHA-256', 0],
+  ['extractingStaging', 'kernel/updater.rs', 'message: "', 3],
+  ['logExtractToStaging', 'kernel/updater.rs', 'tokio::task::spawn_blocking(move || {', 0, -4],
+  ['logStagedVersion', 'kernel/updater.rs', 'Ok(Some(line)) => crate::startup_log(&format!("[', 0],
+  ['logStagedNoOutput', 'kernel/updater.rs', 'Ok(None) => crate::startup_log("[', 0],
+  ['logStagedProbeFailed', 'kernel/updater.rs', 'Err(error) => crate::startup_log(&format!("[', 0],
+  ['logCompatOnly', 'kernel/updater.rs', 'GODEBUG=cpu.all=off', 0],
+  ['logCompatStillFails', 'kernel/updater.rs', 'x.exe -v",', 0],
+  ['logStagedFile', 'kernel/updater.rs', ': {}", staging.display()));', 0],
+  ['stagedVersionMissing', 'kernel/updater.rs', '.with_context(|| format!("{}', 0],
+  ['logStagedVersionMismatch', 'kernel/updater.rs', '{staged_version}', 0],
+  ['stagedVersionMismatch', 'kernel/updater.rs', ': {staged_version}");', 0],
+  ['logPrepareReplace', 'kernel/updater.rs', 'backup.display()', 0, -3],
+  ['installingBackupAndReplace', 'kernel/updater.rs', 'message: "', 4],
+  ['backupOldKernelFailed', 'kernel/updater.rs', '.context("', 0],
+  ['replaceFailedRolledBack', 'kernel/updater.rs', 'return Err(error).context("', 0],
+  ['logReplacedStillFails', 'kernel/updater.rs', ': {error}', 1],
+  ['newKernelVerifyFailedRolledBack', 'kernel/updater.rs', 'return Err(error).context("', 1],
+  ['logInstallComplete', 'kernel/updater.rs', '.map(|p| p.display().to_string())', 0, -6],
+  ['noOldKernelToBackup', 'kernel/updater.rs', '.unwrap_or_else(|| "', 0],
+  ['kernelUpdatedTo', 'kernel/updater.rs', '{}", kind.display_name(), staged_version);', 0],
+  ['compatModeSuffix', 'kernel/updater.rs', 'message.push_str("', 0],
+  ['transportSourceJoin', 'kernel/updater.rs', '{}", transport.label, source.label());', 0],
+  ['channelFailedNextTransport', 'kernel/updater.rs', 'message: format!("{label}', 0],
+  ['downloadAllFailed', 'kernel/updater.rs', '{}", asset.name, failures.join("', 0, 0, 'nonAscii', 0],
+  ['failureJoiner', 'kernel/updater.rs', '{}", asset.name, failures.join("', 0, 0, 'nonAscii', 1],
+  ['httpFailed', 'kernel/updater.rs', 'Err(error) => bail!("HTTP', 0],
+  ['cancelledMarker', 'kernel/updater.rs', 'bail!("', 7],
+  ['downloadExceededLimit', 'kernel/updater.rs', 'bail!("', 8],
+  ['downloadingAsset', 'kernel/updater.rs', 'message: format!("', 2],
+  ['downloadTruncated', 'kernel/updater.rs', '", bytes.len(), expected);', 0],
+  ['downloadInterrupted', 'kernel/updater.rs', ': {error}"),', 1],
+  ['noChannelForSource', 'kernel/updater.rs', 'if order.is_empty() {', 0, 2],
+  ['releaseFetchFailed', 'kernel/updater.rs', ': {remote_error}",', 0],
+  ['kernelDownloadCancelled', 'kernel/updater.rs', 'bail!("', 11],
+  ['assetDigestMissing', 'kernel/updater.rs', '.context("GitHub', 0],
+  ['assetDigestInvalid', 'kernel/updater.rs', '.context("GitHub', 1],
+  ['sha256Mismatch', 'kernel/updater.rs', 'bail!("SHA-256', 0],
+  ['zipOpenFailed', 'kernel/updater.rs', 'let mut zip = zip::ZipArchive::new(Cursor::new(archive)).context("', 0],
+  ['zipMissingExecutable', 'kernel/updater.rs', '{}", kind.executable_name())', 0],
 ];
 
 const hasNonAscii = (text) => /[^\x00-\x7f]/.test(text);
@@ -55,7 +122,7 @@ function literalsIn(line) {
   return [...line.matchAll(/r?"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
 }
 
-function pickLiteral(lines, anchor, occurrence, offset, name, mode = 'nonAscii') {
+function pickLiteral(lines, anchor, occurrence, offset, name, mode = 'nonAscii', pick = undefined) {
   const hits = [];
   lines.forEach((line, index) => {
     if (line.includes(anchor)) hits.push(index);
@@ -76,13 +143,23 @@ function pickLiteral(lines, anchor, occurrence, offset, name, mode = 'nonAscii')
   }
   const found = literalsIn(line);
   const accepted = mode === 'any' ? found : found.filter(hasNonAscii);
-  if (accepted.length !== 1) {
+  if (pick === undefined) {
+    if (accepted.length !== 1) {
+      console.error(
+        `${name}: expected exactly 1 ${mode} literal at ${index + 1}, got ${accepted.length} in:\n${line}`,
+      );
+      process.exit(1);
+    }
+    return { text: accepted[0], line: index + 1 };
+  }
+  // 显式给了 pick：允许一行里有多个候选，但下标必须存在（多行 format! 里那行要有唯一性）。
+  if (pick >= accepted.length) {
     console.error(
-      `${name}: expected exactly 1 ${mode} literal at ${index + 1}, got ${accepted.length} in:\n${line}`,
+      `${name}: line ${index + 1} has ${accepted.length} ${mode} literal(s), want #${pick}:\n${line}`,
     );
     process.exit(1);
   }
-  return { text: accepted[0], line: index + 1 };
+  return { text: accepted[pick], line: index + 1 };
 }
 
 function toCppArray(text) {
@@ -93,9 +170,11 @@ const functions = [];
 const declarations = [];
 const report = [];
 
-for (const [name, file, anchor, occurrence, offset, mode] of entries) {
+for (const [name, file, anchor, occurrence, rawOffset, mode, pick] of entries) {
+  // 省略 offset 就是 0（同一行里定位）。
+  const offset = rawOffset === undefined ? 0 : rawOffset;
   const lines = fs.readFileSync(RUST + '/' + file, 'utf8').split(/\r?\n/);
-  const { text, line } = pickLiteral(lines, anchor, occurrence, offset, name, mode);
+  const { text, line } = pickLiteral(lines, anchor, occurrence, offset, name, mode, pick);
   const parts = toCppArray(text);
   const skeleton = [...text].filter((c) => c.codePointAt(0) < 0x7f).join('');
   const body = [];

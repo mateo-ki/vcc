@@ -1,6 +1,7 @@
 #include "proxy/ProxyManager.h"
 
 #include <QElapsedTimer>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -14,8 +15,10 @@
 #include "core/JsonUtil.h"
 #include "core/Log.h"
 #include "export/ClashProxy.h"
+#include "export/ClashYamlExport.h"
 #include "geo/Geo.h"
 #include "kernel/KernelManager.h"
+#include "net/HttpClient.h"
 #include "platform/ProcessControl.h"
 #include "proxy/Diagnostics.h"
 #include "proxy/SystemProxySession.h"
@@ -543,10 +546,10 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
             const QString dir = Geo::mihomoDir();
             if (!Geo::geoReady(dir)) {
                 const QString systemProxy = SysProxy::currentSystemProxyUrl();
-                const Status provisioned =
+                const Result<QString> provisioned =
                     Geo::provision(dir, systemProxy.isNull() ? QString() : systemProxy, false);
                 if (provisioned.isErr()) {
-                    return provisioned;
+                    return Status::failed(provisioned.error());
                 }
             }
         }
