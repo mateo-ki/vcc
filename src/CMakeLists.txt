@@ -57,6 +57,8 @@ add_library(vccDb STATIC
     db/DatabaseSettings.cpp
     db/DatabaseSpeedtest.cpp
     db/DatabaseStats.cpp
+    db/DatabaseTelemetry.cpp
+    db/DatabaseExport.cpp
 )
 
 target_include_directories(vccDb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -72,8 +74,21 @@ target_link_libraries(vccDb PUBLIC
 
 vcc_target_options(vccDb)
 
+add_library(vccKernel STATIC
+    kernel/KernelTypes.cpp
+)
+
+target_include_directories(vccKernel PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(vccKernel PUBLIC
+    vccCore
+)
+
+vcc_target_options(vccKernel)
+
 add_library(vccProxy STATIC
     proxy/ConfigTypes.cpp
+    proxy/MihomoConfig.cpp
 )
 
 target_include_directories(vccProxy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -81,6 +96,7 @@ target_include_directories(vccProxy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vccProxy PUBLIC
     vccCore
     vccModels
+    vccKernel
     yaml-cpp::yaml-cpp
 )
 
