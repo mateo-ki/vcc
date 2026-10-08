@@ -306,14 +306,15 @@ function(vcc_port_layer target dir)
 endfunction()
 
 vcc_port_layer(vccTasks tasks vccCore vccModels Qt6::Core)
-vcc_port_layer(vccProbe proxy_probe vccProxy vccExport vccKernel vccNet Qt6::Core Qt6::Concurrent)
+vcc_port_layer(vccProbe proxy_probe vccProxy vccExport vccKernel vccKernelManager vccPlatform vccNet
+    Qt6::Core Qt6::Concurrent)
 vcc_port_layer(vccSpeedtest speedtest vccDb vccNet vccProxy vccProbe vccKernel vccTasks Qt6::Core Qt6::Concurrent)
 vcc_port_layer(vccScheduler scheduler vccDb vccCollector vccTelegram vccSpeedtest vccTasks vccProxy vccKernel Qt6::Core Qt6::Concurrent)
 vcc_port_layer(vccRouter router vccCore vccModels Qt6::Core)
 vcc_port_layer(vccApi api vccDb vccProxy vccCollector vccTelegram vccSpeedtest vccScheduler
     vccTasks vccRouter vccExport vccKernel vccNet Qt6::Widgets)
 vcc_port_layer(vccUpdater updater vccKernel vccKernelManager vccNet vccGeo vccTasks
-    LibArchive::libarchive ZLIB::ZLIB Qt6::Core)
+    LibArchive::LibArchive ZLIB::ZLIB Qt6::Core)
 
 add_library(vccCollector STATIC
     collector/Collector.cpp

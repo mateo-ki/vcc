@@ -116,9 +116,7 @@ TEST(ProbeMessages, DelayFailureKeepsRustTemplate)
 {
     // "真实代理测试失败: {error}"，error 已经带目标名前缀。
     const QString expected = realProxyTestFailed() + QStringLiteral(": Google: HTTP 500");
-    EXPECT_EQ(delayFailureMessage(QStringLiteral("Google: HTTP 500"),
-                                  QStringLiteral("Google")),
-              expected);
+    EXPECT_EQ(delayFailureMessage(QStringLiteral("Google: HTTP 500")), expected);
 }
 
 TEST(ProbeMessages, MissingDelayValueNamesTheTarget)

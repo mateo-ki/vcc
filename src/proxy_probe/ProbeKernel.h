@@ -50,7 +50,6 @@ public:
     /// 释放全部占位（Rust 的 `drop(reservations)`）：内核马上要 bind 这些端口了。
     void release();
 
-    QVector<quint16> ports() const { return ports_; }
     qsizetype count() const { return ports_.size(); }
 
 private:
@@ -130,9 +129,6 @@ ProcessOutput runProcessToOutput(const QString &program, const QStringList &argu
 /// 对应 Rust 的 `child.try_wait()` 返回 `Some(status)`：进程是不是已经结束了。
 /// exitText 拿 Rust 的 `ExitStatus` Display 文本（"exit status: N" / 崩溃）。
 bool processExited(const QProcess *process, QString *exitText);
-/// 进程还活着吗（Rust 的 try_wait 为 None）。
-bool processRunning(const QProcess *process);
-
 /// Rust `let _ = child.kill(); let _ = child.wait();`。
 Status killProcess(QProcess *process);
 

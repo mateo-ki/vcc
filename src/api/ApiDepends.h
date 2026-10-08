@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 #include <QString>
 #include <QVector>
 
@@ -8,6 +9,7 @@
 #include <optional>
 
 #include "core/Result.h"
+#include "kernel/KernelManager.h"
 #include "kernel/KernelRelease.h"
 #include "kernel/KernelSource.h"
 #include "kernel/KernelTypes.h"
@@ -30,6 +32,11 @@ class TaskTracker;
 // 【所有方法都是阻塞的】只能在 worker 线程调用（GUI 线程一律经 QtConcurrent 派发），
 // 这与 Rust 侧 handler 全在 tokio 上跑、这里换成"每个请求一个 worker 任务"对应。
 namespace Api {
+
+/// core/Result.h 的 Result/Status 在全局作用域；引进 Api 之后测试夹具里可以写
+/// `Api::Result<...>`，不用每个签名都退回全局名。
+using ::Result;
+using ::Status;
 
 /// 对应 Rust 的 `SpeedTestOptions`（speedtest/mod.rs:57）。API 两个 handler 都把
 /// intensity 固定成 Standard，所以这里不带这个字段；实现方（speedtest 层）按 Standard

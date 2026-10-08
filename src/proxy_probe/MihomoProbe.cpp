@@ -5,7 +5,6 @@
 #include <QFile>
 #include <QSemaphore>
 #include <QString>
-#include <QThread>
 
 #include <algorithm>
 #include <utility>
@@ -127,7 +126,7 @@ ProbeJoin probePreparedProxy(const PreparedProxy &proxy, quint16 controllerPort,
         join.result.message = delaySuccessMessage(delay.value(), kDelayTargetName);
     } else {
         join.result.ok = false;
-        join.result.message = delayFailureMessage(delay.error(), kDelayTargetName);
+        join.result.message = delayFailureMessage(delay.error());
     }
     return join;
 }
@@ -237,10 +236,8 @@ QString delaySuccessMessage(qint64 delayMs, const QString &targetName)
                                   {"{target}", targetName}});
 }
 
-QString delayFailureMessage(const QString &error, const QString &targetName)
+QString delayFailureMessage(const QString &error)
 {
-    Q_UNUSED(targetName);
-    // 目标名已经在 error 里（Rust 的 `{target_name}: {error}` 由 probe_mihomo_target 拼好）。
     return Proxy::Messages::fill(Messages::mihomoDelayFailed(), {{"{error}", error}});
 }
 

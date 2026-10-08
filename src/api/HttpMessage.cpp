@@ -85,7 +85,7 @@ QString Response::header(const QString &lowerName) const
 QByteArray Response::toBytes(bool includeBody) const
 {
     QByteArray wire = "HTTP/1.1 " + QByteArray::number(status) + ' '
-        + reasonPhrase(status).toLatin1() + "\r\n";
+        + Http::reasonPhrase(status).toLatin1() + "\r\n";
     for (const auto &pair : headers) {
         wire += pair.first.toLatin1() + ": " + pair.second.toUtf8() + "\r\n";
     }

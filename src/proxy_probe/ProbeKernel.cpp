@@ -354,11 +354,6 @@ bool processExited(const QProcess *process, QString *exitText)
     return true;
 }
 
-bool processRunning(const QProcess *process)
-{
-    return process != nullptr && process->state() == QProcess::Running;
-}
-
 Status killProcess(QProcess *process)
 {
     if (process == nullptr) {

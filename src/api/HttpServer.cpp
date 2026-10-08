@@ -112,7 +112,8 @@ private:
         currentMethodIsHead_ = request.method == QLatin1String("HEAD");
         ++inFlight_;
         std::shared_ptr<Router> router = router_;
-        QtConcurrent::run([router, request, keepAlive, this]() {
+        // 返回值（QFuture）不需要：结果通过队列调用回到本线程。
+        QThreadPool::globalInstance()->start([router, request, keepAlive, this]() {
             Response response = router->dispatch(request);
             QMetaObject::invokeMethod(
                 this, [this, response, keepAlive] { finishRequest(response, keepAlive); },
@@ -158,7 +159,7 @@ private:
         if (tooLarge) {
             body = QByteArray("Failed to buffer the request body");
         } else {
-            body = Http::errorEnvelope(QStringLiteral("Malformed request")).dump();
+            body = QByteArray::fromStdString(Http::errorEnvelope(QStringLiteral("Malformed request")).dump());
         }
         payload += "content-length: " + QByteArray::number(body.size())
             + "\r\nconnection: close\r\n\r\n" + body;

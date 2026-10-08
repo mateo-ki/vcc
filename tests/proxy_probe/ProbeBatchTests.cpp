@@ -234,6 +234,13 @@ TEST(ProbeMihomoConfig, BatchDocumentCarriesProxiesAndSelectGroup)
     EXPECT_EQ(JsonUtil::dump(Json(config.at("proxy-groups").at(0).at("proxies"))),
               QStringLiteral("[\"probe-0-alpha\",\"probe-1-beta\"]"));
     EXPECT_EQ(JsonUtil::dump(Json(config.at("rules"))), QStringLiteral("[\"MATCH,PROXY\"]"));
+
+    // `mihomo -t` 用的是同一份文档、控制器端口写 0（校验时不监听任何东西）。
+    const Json forValidation = buildBatchProbeConfig(QVector<PreparedProxy>(), 0);
+    EXPECT_EQ(forValidation.at("external-controller"), "127.0.0.1:0");
+    EXPECT_EQ(JsonUtil::dump(Json(forValidation.at("proxies"))), QStringLiteral("[]"));
+    EXPECT_EQ(JsonUtil::dump(Json(forValidation.at("proxy-groups").at(0).at("proxies"))),
+              QStringLiteral("[]"));
 }
 
 TEST(ProbeIsolation, RejectsOnlyTheInvalidMemberOfAMixedBatch)

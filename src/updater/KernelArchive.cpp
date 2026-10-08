@@ -1,5 +1,6 @@
 #include "updater/KernelArchive.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 
@@ -199,7 +200,7 @@ Status extractExecutable(const QByteArray &archive, Kernel::Kind kind, const QSt
                 executableFound = true;
             } else if (!targetDirectory.isEmpty()) {
                 const Status written =
-                    writeFileBytes(QFileInfo(targetDirectory).filePath(fileName), body.value());
+                    writeFileBytes(QDir(targetDirectory).filePath(fileName), body.value());
                 if (written.isErr()) {
                     return written;
                 }

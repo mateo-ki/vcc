@@ -11,7 +11,6 @@
 #include "core/JsonUtil.h"
 #include "core/Result.h"
 #include "models/Node.h"
-#include "proxy_probe/JoinWindow.h"
 #include "proxy_probe/ProbeTypes.h"
 
 class QSemaphore;
@@ -76,8 +75,10 @@ QString mihomoDelayUrl(const QString &proxyName, quint16 controllerPort, const Q
                        const QString &timeoutMs);
 
 /// `{delay} ms (真实代理 · {target})` / `真实代理测试失败: {error}`。
+/// error 已经带上目标名（Rust 的 `{target_name}: {error}` 由探针自己拼），所以失败消息
+/// 只需要那一整段。
 QString delaySuccessMessage(qint64 delayMs, const QString &targetName);
-QString delayFailureMessage(const QString &error, const QString &targetName);
+QString delayFailureMessage(const QString &error);
 /// `{target_name}: 未返回有效延迟`
 QString delayMissingValueMessage(const QString &targetName);
 

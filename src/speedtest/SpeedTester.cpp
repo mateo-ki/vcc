@@ -85,7 +85,8 @@ ProbeOutcome finishProbe(QTcpSocket &socket, qint64 latencyMs, const QString &ho
         outcome.message = QStringLiteral("%1 ms (TCP)").arg(latencyMs);
         return outcome;
     }
-    const qint64 downloadMs = qBound<qint64>(200, qint64(downloadTestMs), 5000);
+    const qint64 downloadMs =
+        qBound<qint64>(Q_INT64_C(200), qint64(downloadTestMs), Q_INT64_C(5000));
     const DownloadMeasurement measured = measureTcpDownload(socket, host, downloadMs);
     std::optional<double> kbps;
     if (measured.kbps.has_value() && std::isfinite(*measured.kbps) && *measured.kbps > 0.0
@@ -199,9 +200,9 @@ qint64 proxyTimeoutMs(const SpeedTestOptions &options)
     case SpeedtestIntensity::Fast:
         return 1800;
     case SpeedtestIntensity::Standard:
-        return qBound<qint64>(2500, options.timeoutMs, 15000);
+        return qBound<qint64>(Q_INT64_C(2500), qint64(options.timeoutMs), Q_INT64_C(15000));
     case SpeedtestIntensity::Deep:
-        return qBound<qint64>(4000, options.timeoutMs, 20000);
+        return qBound<qint64>(Q_INT64_C(4000), qint64(options.timeoutMs), Q_INT64_C(20000));
     }
     return 1500;
 }
@@ -633,7 +634,7 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
             const int port = node.port;
             const ResolvedAddresses addresses = resolutionFor(resolved, host, port);
             inflight.submit(
-                [&inflight, &networkLimit, &resolved, &results, &done, &okCount, &progress,
+                [&inflight, &networkLimit, &results, &done, &okCount, &progress,
                  &started, total, id, name, host, port, prefilterMs, downloadTestMs,
                  measureDownload, addresses]() {
                     Permit permit(networkLimit);

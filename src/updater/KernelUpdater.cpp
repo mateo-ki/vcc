@@ -19,6 +19,8 @@
 
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
+// windows.h 的 max/min 宏会把 std::max(...) 拆成语法垃圾，这里只用 std 的那套。
+#define NOMINMAX
 #include <windows.h>
 #endif
 
@@ -942,7 +944,9 @@ Result<QByteArray> KernelUpdater::streamAsset(Kernel::Kind kind,
     }
     // 一次一条连接，进度只在这条连接结束时报一次；速度按本条连接自己的字节数/耗时算
     // （对应 Rust 每个 chunk 用 started 累计的那套）。
-    const double elapsed = std::max(0.001, double(clock.elapsed()) / 1000.0);
+    const double rawElapsed = double(clock.elapsed()) / 1000.0;
+    // Rust：`started.elapsed().as_secs_f64().max(0.001)`。
+    const double elapsed = rawElapsed < 0.001 ? 0.001 : rawElapsed;
     const quint64 own = quint64(bytes.size());
     report(progress, kind,
            UpdateStage::Downloading,

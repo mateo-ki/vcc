@@ -26,6 +26,13 @@ QString intensityToText(SpeedtestIntensity intensity);
 /// 解析失败退回默认档（Standard），对应 serde 的 #[default]。
 SpeedtestIntensity intensityFromText(const QString &text);
 
+/// Rust 的 `#[default] Standard`。C++ 的值初始化（`SpeedtestIntensity{}`）会落到第一个
+/// 枚举数 Fast，所以凡是要「拿默认档」的地方都用这个函数，别依赖零初始化。
+inline constexpr SpeedtestIntensity defaultIntensity()
+{
+    return SpeedtestIntensity::Standard;
+}
+
 QString intensityLabel(SpeedtestIntensity intensity);
 QString intensityDescription(SpeedtestIntensity intensity);
 

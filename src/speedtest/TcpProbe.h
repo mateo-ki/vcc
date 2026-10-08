@@ -2,14 +2,13 @@
 
 #include <QHostAddress>
 #include <QString>
+#include <QTcpSocket>
 #include <QVector>
 
 #include <memory>
 #include <optional>
 
 #include "core/Result.h"
-
-class QTcpSocket;
 
 /// TCP 连通性/下载探测的底层管道，对应 Rust speedtest/mod.rs 里的自由函数
 /// connect_fast / connect_resolved / measure_tcp_download / looks_like_public_website，

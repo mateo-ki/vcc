@@ -529,7 +529,7 @@ Response connectProxyNode(const Handlers &handlers, const AppState &state, const
     if (!state.db || !state.proxy) {
         return Handlers::errorResponse(QStringLiteral("proxy layer is not wired"));
     }
-    const Result<Models::Node> loaded = state.db->getNode(nodeId);
+    Result<Models::Node> loaded = state.db->getNode(nodeId);
     if (loaded.isErr()) {
         return Handlers::errorResponse(loaded.error());
     }
@@ -1268,7 +1268,7 @@ Result<QVector<Models::Node>> Handlers::loadExportNodes(const ExportQuery &query
     } else {
         fetchLimit = params.limit;
     }
-    const Result<QVector<Models::Node>> loaded = DbExport::exportNodesFiltered(
+    Result<QVector<Models::Node>> loaded = DbExport::exportNodesFiltered(
         *state_.db, query.protocol, query.sourceId, params.qualityOnly, params.maxLatencyMs,
         params.minDownloadKbps, fetchLimit);
     if (loaded.isErr()) {
