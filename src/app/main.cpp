@@ -3,6 +3,7 @@
 #include <QCommandLineParser>
 #include <QDir>
 
+#include "api/ApiServerController.h"
 #include "app/AppContext.h"
 #include "app/MainWindow.h"
 #include "core/Log.h"
@@ -90,6 +91,10 @@ int main(int argc, char **argv)
 
     App::AppContext::Options options;
     options.dbPath = parser.value(dbOption);
+    options.listenAddr = parser.value(listenOption);
+    if (parser.isSet(tokenOption)) {
+        options.apiToken = parser.value(tokenOption);
+    }
     const Result<std::shared_ptr<App::AppContext>> created = App::AppContext::create(options);
     if (created.isErr()) {
         Log::startup(QStringLiteral("startup failed: %1").arg(created.error()));
@@ -97,6 +102,20 @@ int main(int argc, char **argv)
     }
     std::shared_ptr<App::AppContext> context = created.value();
     Log::startup(QStringLiteral("database ready at %1").arg(options.dbPath));
+
+    if (parser.isSet(headlessOption) || context->settings().httpServerEnabled) {
+        context->apiServer().start();
+    }
+
+    if (parser.isSet(headlessOption)) {
+        Log::startup(QStringLiteral("Running in headless mode."));
+        if (!parser.isSet(tokenOption) && qEnvironmentVariable("VPN_PARSER_API_TOKEN").isEmpty()) {
+            if (auto t = context->apiServer().token()) {
+                Log::startup(QStringLiteral("HTTP API 访问令牌（本次启动随机生成）: %1").arg(*t));
+            }
+        }
+        return app.exec();
+    }
 
     Gui::Theme::apply(context->settings().uiTheme);
 

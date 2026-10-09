@@ -9,6 +9,7 @@
 #include <QWidget>
 
 #include "app/AppContext.h"
+#include "gui/Page.h"
 #include "gui/Pages.h"
 #include "gui/Theme.h"
 #include "gui/UiText.h"
@@ -50,9 +51,10 @@ MainWindow::MainWindow(App::AppContext &context, QWidget *parent)
 
     pages_ = new QStackedWidget(right);
     pages_->addWidget(createProxyPage(context_, pages_));
-    for (int index = 1; index < kTabCount; ++index) {
-        pages_->addWidget(new QWidget(pages_));
-    }
+    pages_->addWidget(createNodesPage(context_, pages_));
+    pages_->addWidget(createSourcesPage(context_, pages_));
+    pages_->addWidget(createSettingsPage(context_, pages_));
+    pages_->addWidget(createApiPage(context_, pages_));
     rightBox->addWidget(pages_, 1);
     rightBox->addWidget(buildStatusStrip());
 
@@ -149,6 +151,10 @@ void MainWindow::selectTab(Tab tab)
     pages_->setCurrentIndex(int(tab));
     for (QPushButton *button : navButtons_) {
         button->setChecked(button->property("tab").toInt() == int(tab));
+    }
+    auto *pageWidget = qobject_cast<Page *>(pages_->currentWidget());
+    if (pageWidget != nullptr) {
+        pageWidget->refresh();
     }
 }
 

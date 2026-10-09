@@ -13,6 +13,10 @@
 
 class Database;
 
+namespace Api {
+class ApiServerController;
+}
+
 namespace Proxy {
 class ProxyManager;
 }
@@ -30,13 +34,21 @@ class AppContext : public QObject {
 public:
     struct Options {
         QString dbPath;
+        QString listenAddr = QStringLiteral("127.0.0.1:8080");
+        std::optional<QString> apiToken;
     };
 
     static Result<std::shared_ptr<AppContext>> create(const Options &options);
 
     Database &database();
+    std::shared_ptr<Database> databasePtr() const;
     Proxy::ProxyManager &proxy();
+    std::shared_ptr<Proxy::ProxyManager> proxyPtr() const;
     Tasks::TaskTracker &tasks();
+    std::shared_ptr<Tasks::TaskTracker> tasksPtr() const;
+    Api::ApiServerController &apiServer();
+    const Api::ApiServerController &apiServer() const;
+    std::shared_ptr<Api::ApiServerController> apiServerPtr() const;
 
     /// 设置的工作副本：界面读它，写一律走 saveSettings（落库成功后才更新缓存）。
     const Models::AppSettings &settings() const;
@@ -49,7 +61,7 @@ public:
     void runAsync(Continuation work, Continuation onUi);
 
     /// shared_ptr 的删除器要在 std 的上下文里能析构，所以析构函数得公开；
-    /// unique_ptr<Proxy::ProxyManager> 也需要完整类型，实现留在 .cpp。
+    /// 实现留在 .cpp。
     ~AppContext() override;
 
 signals:
@@ -60,8 +72,9 @@ private:
     AppContext();
 
     std::shared_ptr<Database> database_;
-    std::unique_ptr<Proxy::ProxyManager> proxy_;
-    Tasks::TaskTracker tasks_;
+    std::shared_ptr<Proxy::ProxyManager> proxy_;
+    std::shared_ptr<Tasks::TaskTracker> tasks_;
+    std::shared_ptr<Api::ApiServerController> apiServer_;
     Models::AppSettings settings_;
 };
 

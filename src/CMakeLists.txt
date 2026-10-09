@@ -184,6 +184,13 @@ target_link_libraries(vccGui PUBLIC
     vccKernel
     vccKernelManager
     vccUpdater
+    vccExport
+    vccGeo
+    vccSpeedtest
+    vccCollector
+    vccTelegram
+    vccPlatform
+    vccApi
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -209,6 +216,8 @@ target_link_libraries(vccApp PUBLIC
     vccProxy
     vccTasks
     vccPlatform
+    vccApi
+    vccKernelManager
 )
 
 vcc_target_options(vccApp)

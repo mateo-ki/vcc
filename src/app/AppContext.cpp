@@ -2,6 +2,10 @@
 
 #include <QMetaType>
 
+#include <QUuid>
+
+#include "api/ApiGateways.h"
+#include "api/ApiServerController.h"
 #include "core/Log.h"
 #include "db/Database.h"
 #include "proxy/MihomoConfig.h"
@@ -9,7 +13,10 @@
 
 namespace App {
 
-AppContext::AppContext() = default;
+AppContext::AppContext()
+    : tasks_(std::make_shared<Tasks::TaskTracker>())
+{
+}
 
 AppContext::~AppContext() = default;
 
@@ -46,12 +53,38 @@ Result<std::shared_ptr<AppContext>> AppContext::create(const Options &options)
             configOptions = parsed.value();
         }
     }
-    context->proxy_ = std::make_unique<Proxy::ProxyManager>(configOptions);
+    context->proxy_ = std::make_shared<Proxy::ProxyManager>(configOptions);
 
     const Status loaded = context->reloadSettings();
     if (loaded.isErr()) {
         return Result<std::shared_ptr<AppContext>>::withError(loaded.error());
     }
+
+    Api::AppState state;
+    state.db = context->database_;
+    state.tasks = context->tasks_;
+    state.proxy = Api::makeProxyGateway(context->proxy_);
+    state.kernel = Api::makeKernelGateway();
+
+    QString token;
+    if (options.apiToken.has_value() && !options.apiToken->trimmed().isEmpty()) {
+        token = options.apiToken->trimmed();
+    } else {
+        const QString envToken = qEnvironmentVariable("VPN_PARSER_API_TOKEN").trimmed();
+        if (!envToken.isEmpty()) {
+            token = envToken;
+        } else {
+            token = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        }
+    }
+
+    const QString listen = options.listenAddr.trimmed().isEmpty()
+                               ? QStringLiteral("127.0.0.1:8080")
+                               : options.listenAddr.trimmed();
+
+    context->apiServer_ = std::make_shared<Api::ApiServerController>(
+        state, listen, token);
+
     return Result<std::shared_ptr<AppContext>>::withValue(context);
 }
 
@@ -60,14 +93,44 @@ Database &AppContext::database()
     return *database_;
 }
 
+std::shared_ptr<Database> AppContext::databasePtr() const
+{
+    return database_;
+}
+
 Proxy::ProxyManager &AppContext::proxy()
 {
     return *proxy_;
 }
 
+std::shared_ptr<Proxy::ProxyManager> AppContext::proxyPtr() const
+{
+    return proxy_;
+}
+
 Tasks::TaskTracker &AppContext::tasks()
 {
+    return *tasks_;
+}
+
+std::shared_ptr<Tasks::TaskTracker> AppContext::tasksPtr() const
+{
     return tasks_;
+}
+
+Api::ApiServerController &AppContext::apiServer()
+{
+    return *apiServer_;
+}
+
+const Api::ApiServerController &AppContext::apiServer() const
+{
+    return *apiServer_;
+}
+
+std::shared_ptr<Api::ApiServerController> AppContext::apiServerPtr() const
+{
+    return apiServer_;
 }
 
 const Models::AppSettings &AppContext::settings() const
