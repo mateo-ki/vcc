@@ -13,7 +13,7 @@ QString fromCodePoints(std::initializer_list<char32_t> points)
 
 }
 
-// brandSubtitle <- gui/views/sidebar.rs:51
+// brandSubtitle <- gui/views/sidebar.rs:-1
 // ASCII 骨架: ""
 QString brandSubtitle()
 {
@@ -22,7 +22,7 @@ QString brandSubtitle()
     });
 }
 
-// navConsole <- gui/views/sidebar.rs:63
+// navConsole <- gui/views/sidebar.rs:-1
 // ASCII 骨架: ""
 QString navConsole()
 {
@@ -31,7 +31,7 @@ QString navConsole()
     });
 }
 
-// navNodePool <- gui/views/sidebar.rs:64
+// navNodePool <- gui/views/sidebar.rs:-1
 // ASCII 骨架: ""
 QString navNodePool()
 {
@@ -40,7 +40,7 @@ QString navNodePool()
     });
 }
 
-// navSubscriptions <- gui/views/sidebar.rs:65
+// navSubscriptions <- gui/views/sidebar.rs:-1
 // ASCII 骨架: ""
 QString navSubscriptions()
 {
@@ -49,7 +49,7 @@ QString navSubscriptions()
     });
 }
 
-// navSystemSettings <- gui/views/sidebar.rs:66
+// navSystemSettings <- gui/views/sidebar.rs:-1
 // ASCII 骨架: ""
 QString navSystemSettings()
 {
@@ -58,7 +58,7 @@ QString navSystemSettings()
     });
 }
 
-// navExternalApi <- gui/views/sidebar.rs:67
+// navExternalApi <- gui/views/sidebar.rs:-1
 // ASCII 骨架: ""
 QString navExternalApi()
 {
@@ -67,7 +67,7 @@ QString navExternalApi()
     });
 }
 
-// panelNodes <- gui/views/proxy.rs:333
+// panelNodes <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString panelNodes()
 {
@@ -76,7 +76,7 @@ QString panelNodes()
     });
 }
 
-// panelConnections <- gui/views/proxy.rs:337
+// panelConnections <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString panelConnections()
 {
@@ -85,7 +85,7 @@ QString panelConnections()
     });
 }
 
-// panelConnectionsCounted <- gui/views/proxy.rs:340
+// panelConnectionsCounted <- gui/views/proxy.rs:-1
 // ASCII 骨架: " ({})"
 QString panelConnectionsCounted()
 {
@@ -95,7 +95,7 @@ QString panelConnectionsCounted()
     });
 }
 
-// panelRules <- gui/views/proxy.rs:352
+// panelRules <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString panelRules()
 {
@@ -104,14 +104,14 @@ QString panelRules()
     });
 }
 
-// panelNetwork <- gui/views/proxy.rs:359
+// panelNetwork <- gui/views/proxy.rs:-1
 // ASCII 骨架: "DNS / TUN"
 QString panelNetwork()
 {
     return QStringLiteral("DNS / TUN");
 }
 
-// panelKernels <- gui/views/proxy.rs:366
+// panelKernels <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString panelKernels()
 {
@@ -120,7 +120,7 @@ QString panelKernels()
     });
 }
 
-// panelLogs <- gui/views/proxy.rs:373
+// panelLogs <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString panelLogs()
 {
@@ -129,7 +129,7 @@ QString panelLogs()
     });
 }
 
-// stateStopped <- gui/widgets.rs:670
+// stateStopped <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString stateStopped()
 {
@@ -138,7 +138,7 @@ QString stateStopped()
     });
 }
 
-// stateStarting <- gui/widgets.rs:671
+// stateStarting <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString stateStarting()
 {
@@ -147,7 +147,7 @@ QString stateStarting()
     });
 }
 
-// stateRunning <- gui/widgets.rs:672
+// stateRunning <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString stateRunning()
 {
@@ -156,7 +156,7 @@ QString stateRunning()
     });
 }
 
-// stateDegraded <- gui/widgets.rs:673
+// stateDegraded <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString stateDegraded()
 {
@@ -165,7 +165,7 @@ QString stateDegraded()
     });
 }
 
-// stateStopping <- gui/widgets.rs:674
+// stateStopping <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString stateStopping()
 {
@@ -174,7 +174,7 @@ QString stateStopping()
     });
 }
 
-// stateFailed <- gui/widgets.rs:675
+// stateFailed <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString stateFailed()
 {
@@ -183,7 +183,7 @@ QString stateFailed()
     });
 }
 
-// preparedFailed <- gui/views/proxy.rs:56
+// preparedFailed <- gui/views/proxy.rs:-1
 // ASCII 骨架: "   {}/{}"
 QString preparedFailed()
 {
@@ -193,7 +193,7 @@ QString preparedFailed()
     });
 }
 
-// preparedDownloading <- gui/views/proxy.rs:54
+// preparedDownloading <- gui/views/proxy.rs:-1
 // ASCII 骨架: "   ({}/{})"
 QString preparedDownloading()
 {
@@ -204,7 +204,7 @@ QString preparedDownloading()
     });
 }
 
-// prepared <- gui/views/proxy.rs:65
+// prepared <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString prepared()
 {
@@ -213,7 +213,7 @@ QString prepared()
     });
 }
 
-// regionLabel <- gui/views/proxy.rs:506
+// regionLabel <- gui/views/proxy.rs:-1
 // ASCII 骨架: ":"
 QString regionLabel()
 {
@@ -222,7 +222,7 @@ QString regionLabel()
     });
 }
 
-// regionAll <- gui/views/proxy.rs:507
+// regionAll <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString regionAll()
 {
@@ -231,7 +231,7 @@ QString regionAll()
     });
 }
 
-// regionHK <- gui/views/proxy.rs:508
+// regionHK <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString regionHK()
 {
@@ -240,7 +240,7 @@ QString regionHK()
     });
 }
 
-// regionJP <- gui/views/proxy.rs:509
+// regionJP <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString regionJP()
 {
@@ -249,7 +249,7 @@ QString regionJP()
     });
 }
 
-// regionUS <- gui/views/proxy.rs:510
+// regionUS <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString regionUS()
 {
@@ -258,7 +258,7 @@ QString regionUS()
     });
 }
 
-// regionSG <- gui/views/proxy.rs:511
+// regionSG <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString regionSG()
 {
@@ -267,7 +267,7 @@ QString regionSG()
     });
 }
 
-// regionTW <- gui/views/proxy.rs:512
+// regionTW <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString regionTW()
 {
@@ -276,7 +276,7 @@ QString regionTW()
     });
 }
 
-// regionKR <- gui/views/proxy.rs:513
+// regionKR <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString regionKR()
 {
@@ -285,7 +285,7 @@ QString regionKR()
     });
 }
 
-// regionOther <- gui/views/proxy.rs:514
+// regionOther <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString regionOther()
 {
@@ -294,7 +294,7 @@ QString regionOther()
     });
 }
 
-// sortLabel <- gui/views/proxy.rs:535
+// sortLabel <- gui/views/proxy.rs:-1
 // ASCII 骨架: ":"
 QString sortLabel()
 {
@@ -303,7 +303,7 @@ QString sortLabel()
     });
 }
 
-// sortByLatency <- gui/views/proxy.rs:538
+// sortByLatency <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString sortByLatency()
 {
@@ -312,7 +312,7 @@ QString sortByLatency()
     });
 }
 
-// sortByName <- gui/views/proxy.rs:544
+// sortByName <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString sortByName()
 {
@@ -321,7 +321,7 @@ QString sortByName()
     });
 }
 
-// nodeCountTotal <- gui/views/proxy.rs:552
+// nodeCountTotal <- gui/views/proxy.rs:-1
 // ASCII 骨架: " {} "
 QString nodeCountTotal()
 {
@@ -330,7 +330,7 @@ QString nodeCountTotal()
     });
 }
 
-// searchHint <- gui/views/proxy.rs:575
+// searchHint <- gui/views/proxy.rs:-1
 // ASCII 骨架: "..."
 QString searchHint()
 {
@@ -339,7 +339,7 @@ QString searchHint()
     });
 }
 
-// menuDetails <- gui/views/proxy.rs:702
+// menuDetails <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString menuDetails()
 {
@@ -348,7 +348,7 @@ QString menuDetails()
     });
 }
 
-// menuSpeedtest <- gui/views/proxy.rs:709
+// menuSpeedtest <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString menuSpeedtest()
 {
@@ -357,7 +357,7 @@ QString menuSpeedtest()
     });
 }
 
-// menuIpRisk <- gui/views/proxy.rs:713
+// menuIpRisk <- gui/views/proxy.rs:-1
 // ASCII 骨架: "IP "
 QString menuIpRisk()
 {
@@ -366,7 +366,7 @@ QString menuIpRisk()
     });
 }
 
-// menuLockEgress <- gui/views/proxy.rs:719
+// menuLockEgress <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString menuLockEgress()
 {
@@ -376,7 +376,7 @@ QString menuLockEgress()
     });
 }
 
-// switchReasonManual <- gui/views/proxy.rs:733
+// switchReasonManual <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString switchReasonManual()
 {
@@ -385,7 +385,7 @@ QString switchReasonManual()
     });
 }
 
-// latencyProxyFailed <- gui/widgets.rs:580
+// latencyProxyFailed <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString latencyProxyFailed()
 {
@@ -394,7 +394,7 @@ QString latencyProxyFailed()
     });
 }
 
-// latencyTcpFailed <- gui/widgets.rs:585
+// latencyTcpFailed <- gui/widgets.rs:-1
 // ASCII 骨架: "TCP  "
 QString latencyTcpFailed()
 {
@@ -404,7 +404,7 @@ QString latencyTcpFailed()
     });
 }
 
-// latencyUntested <- gui/widgets.rs:586
+// latencyUntested <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString latencyUntested()
 {
@@ -413,7 +413,7 @@ QString latencyUntested()
     });
 }
 
-// kernelNameFallback <- gui/widgets.rs:576
+// kernelNameFallback <- gui/widgets.rs:-1
 // ASCII 骨架: ""
 QString kernelNameFallback()
 {
@@ -422,7 +422,7 @@ QString kernelNameFallback()
     });
 }
 
-// switchingLabel <- gui/widgets.rs:241
+// switchingLabel <- gui/widgets.rs:-1
 // ASCII 骨架: "..."
 QString switchingLabel()
 {
@@ -431,7 +431,7 @@ QString switchingLabel()
     });
 }
 
-// emptyNodeGrid <- gui/views/proxy.rs:659
+// emptyNodeGrid <- gui/views/proxy.rs:-1
 // ASCII 骨架: ""
 QString emptyNodeGrid()
 {
@@ -442,7 +442,7 @@ QString emptyNodeGrid()
     });
 }
 
-// egressLockedStatus <- gui/views/proxy.rs:741
+// egressLockedStatus <- gui/views/proxy.rs:-1
 // ASCII 骨架: " {name}"
 QString egressLockedStatus()
 {
@@ -450,6 +450,218 @@ QString egressLockedStatus()
         0x5DF2, 0x5173, 0x95ED, 0x81EA, 0x52A8, 0x9009, 0x8DEF, 0xFF0C,
         0x51FA, 0x53E3, 0x9501, 0x5B9A, 0x4E3A, 0x0020, 0x007B, 0x006E,
         0x0061, 0x006D, 0x0065, 0x007D,
+    });
+}
+
+// kernelSectionTitle <- gui/views/proxy.rs:1707
+// ASCII 骨架: ""
+QString kernelSectionTitle()
+{
+    return fromCodePoints({
+        0x4EE3, 0x7406, 0x5185, 0x6838,
+    });
+}
+
+// kernelSectionHint <- gui/views/proxy.rs:-1
+// ASCII 骨架: " v2rayN"
+QString kernelSectionHint()
+{
+    return fromCodePoints({
+        0x5E94, 0x7528, 0x72EC, 0x7ACB, 0x4E0B, 0x8F7D, 0x3001, 0x6821,
+        0x9A8C, 0x3001, 0x5907, 0x4EFD, 0x548C, 0x66F4, 0x65B0, 0xFF0C,
+        0x4E0D, 0x4F9D, 0x8D56, 0x0020, 0x0076, 0x0032, 0x0072, 0x0061,
+        0x0079, 0x004E,
+    });
+}
+
+// kernelStorageHint <- gui/views/proxy.rs:-1
+// ASCII 骨架: " data/kernels   GitHub Release"
+QString kernelStorageHint()
+{
+    return fromCodePoints({
+        0x5B58, 0x50A8, 0x76EE, 0x5F55, 0x0020, 0x0064, 0x0061, 0x0074,
+        0x0061, 0x002F, 0x006B, 0x0065, 0x0072, 0x006E, 0x0065, 0x006C,
+        0x0073, 0x0020, 0x00B7, 0x0020, 0x6765, 0x6E90, 0x4E3A, 0x5B98,
+        0x65B9, 0x0020, 0x0047, 0x0069, 0x0074, 0x0048, 0x0075, 0x0062,
+        0x0020, 0x0052, 0x0065, 0x006C, 0x0065, 0x0061, 0x0073, 0x0065,
+    });
+}
+
+// kernelCheckUpdates <- gui/views/proxy.rs:-1
+// ASCII 骨架: ""
+QString kernelCheckUpdates()
+{
+    return fromCodePoints({
+        0x68C0, 0x67E5, 0x66F4, 0x65B0,
+    });
+}
+
+// kernelCheckingStatus <- gui/views/proxy.rs:1721
+// ASCII 骨架: "..."
+QString kernelCheckingStatus()
+{
+    return fromCodePoints({
+        0x6B63, 0x5728, 0x68C0, 0x67E5, 0x5B98, 0x65B9, 0x5185, 0x6838,
+        0x7248, 0x672C, 0x002E, 0x002E, 0x002E,
+    });
+}
+
+// kernelCancelDownload <- gui/views/proxy.rs:-1
+// ASCII 骨架: ""
+QString kernelCancelDownload()
+{
+    return fromCodePoints({
+        0x53D6, 0x6D88, 0x4E0B, 0x8F7D,
+    });
+}
+
+// kernelCancellingStatus <- gui/views/proxy.rs:1725
+// ASCII 骨架: "..."
+QString kernelCancellingStatus()
+{
+    return fromCodePoints({
+        0x6B63, 0x5728, 0x53D6, 0x6D88, 0x5185, 0x6838, 0x4E0B, 0x8F7D,
+        0x002E, 0x002E, 0x002E,
+    });
+}
+
+// kernelColumnKind <- gui/views/proxy.rs:1773
+// ASCII 骨架: ""
+QString kernelColumnKind()
+{
+    return fromCodePoints({
+        0x5185, 0x6838,
+    });
+}
+
+// kernelColumnStatus <- gui/views/proxy.rs:1777
+// ASCII 骨架: ""
+QString kernelColumnStatus()
+{
+    return fromCodePoints({
+        0x72B6, 0x6001,
+    });
+}
+
+// kernelColumnVersion <- gui/views/proxy.rs:1781
+// ASCII 骨架: ""
+QString kernelColumnVersion()
+{
+    return fromCodePoints({
+        0x5F53, 0x524D, 0x7248, 0x672C,
+    });
+}
+
+// kernelColumnLatest <- gui/views/proxy.rs:1785
+// ASCII 骨架: ""
+QString kernelColumnLatest()
+{
+    return fromCodePoints({
+        0x6700, 0x65B0, 0x7248, 0x672C,
+    });
+}
+
+// kernelColumnPath <- gui/views/proxy.rs:1789
+// ASCII 骨架: ""
+QString kernelColumnPath()
+{
+    return fromCodePoints({
+        0x8DEF, 0x5F84,
+    });
+}
+
+// kernelColumnAction <- gui/views/proxy.rs:1793
+// ASCII 骨架: ""
+QString kernelColumnAction()
+{
+    return fromCodePoints({
+        0x64CD, 0x4F5C,
+    });
+}
+
+// kernelStateAvailable <- gui/views/proxy.rs:1818
+// ASCII 骨架: ""
+QString kernelStateAvailable()
+{
+    return fromCodePoints({
+        0x53EF, 0x7528,
+    });
+}
+
+// kernelStateMissing <- gui/views/proxy.rs:1820
+// ASCII 骨架: ""
+QString kernelStateMissing()
+{
+    return fromCodePoints({
+        0x672A, 0x627E, 0x5230,
+    });
+}
+
+// kernelLatestChecking <- gui/views/proxy.rs:1802
+// ASCII 骨架: ""
+QString kernelLatestChecking()
+{
+    return fromCodePoints({
+        0x68C0, 0x67E5, 0x4E2D,
+    });
+}
+
+// kernelActionUpdate <- gui/views/proxy.rs:1847
+// ASCII 骨架: ""
+QString kernelActionUpdate()
+{
+    return fromCodePoints({
+        0x66F4, 0x65B0,
+    });
+}
+
+// kernelActionDownload <- gui/views/proxy.rs:1847
+// ASCII 骨架: ""
+QString kernelActionDownload()
+{
+    return fromCodePoints({
+        0x4E0B, 0x8F7D,
+    });
+}
+
+// kernelHoverInUse <- gui/views/proxy.rs:1860
+// ASCII 骨架: ""
+QString kernelHoverInUse()
+{
+    return fromCodePoints({
+        0x505C, 0x6B62, 0x5F53, 0x524D, 0x4EE3, 0x7406, 0x540E, 0x624D,
+        0x80FD, 0x66F4, 0x65B0, 0x8FD9, 0x4E2A, 0x5185, 0x6838,
+    });
+}
+
+// kernelHoverAsset <- gui/views/proxy.rs:-1
+// ASCII 骨架: " SHA-256 "
+QString kernelHoverAsset()
+{
+    return fromCodePoints({
+        0x4E0B, 0x8F7D, 0x5B98, 0x65B9, 0x8D44, 0x4EA7, 0xFF0C, 0x6821,
+        0x9A8C, 0x0020, 0x0053, 0x0048, 0x0041, 0x002D, 0x0032, 0x0035,
+        0x0036, 0x0020, 0x540E, 0x5907, 0x4EFD, 0x66FF, 0x6362,
+    });
+}
+
+// kernelProgressFormat <- gui/views/proxy.rs:1744
+// ASCII 骨架: "{}  {}  {}"
+QString kernelProgressFormat()
+{
+    return fromCodePoints({
+        0x007B, 0x007D, 0x0020, 0x00B7, 0x0020, 0x007B, 0x007D, 0x0020,
+        0x00B7, 0x0020, 0x007B, 0x007D,
+    });
+}
+
+// kernelDownloadFormat <- gui/views/proxy.rs:1731
+// ASCII 骨架: "{} / {}  {}/s"
+QString kernelDownloadFormat()
+{
+    return fromCodePoints({
+        0x007B, 0x007D, 0x0020, 0x002F, 0x0020, 0x007B, 0x007D, 0x0020,
+        0x00B7, 0x0020, 0x007B, 0x007D, 0x002F, 0x0073,
     });
 }
 

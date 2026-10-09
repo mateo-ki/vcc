@@ -23,13 +23,16 @@
 #include "db/Database.h"
 #include "gui/CountryNames.h"
 #include "gui/FlowLayout.h"
+#include "gui/KernelPanel.h"
 #include "gui/NodeText.h"
 #include "gui/Prepare.h"
 #include "gui/Theme.h"
 #include "gui/UiText.h"
+#include "gui/Widgets.h"
 #include "kernel/KernelManager.h"
 #include "proxy/ProxyManager.h"
 #include "sysproxy/Format.h"
+#include "updater/KernelUpdater.h"
 
 namespace {
 
@@ -99,12 +102,18 @@ ProxyPage::ProxyPage(App::AppContext &context, QWidget *parent) : Page(context, 
     // 先把六个格子摆出来：Connections/Rules/Network/Kernels 由后续层填实，
     // Nodes 与 Logs 这一层已经能用。
     for (int index = 0; index < 6; ++index) {
-        auto *panel = new QWidget(stack_);
-        panel->setObjectName(QStringLiteral("Panel%1").arg(index));
-        stack_->addWidget(panel);
+        if (index == int(Panel::Nodes)) {
+            stack_->addWidget(buildNodesPanel());
+        } else if (index == int(Panel::Kernels)) {
+            stack_->addWidget(buildKernelsPanel());
+        } else if (index == int(Panel::Logs)) {
+            stack_->addWidget(buildLogsPanel());
+        } else {
+            auto *panel = new QWidget(stack_);
+            panel->setObjectName(QStringLiteral("Panel%1").arg(index));
+            stack_->addWidget(panel);
+        }
     }
-    stack_->insertWidget(int(Panel::Nodes), buildNodesPanel());
-    stack_->insertWidget(int(Panel::Logs), buildLogsPanel());
     connect(panels_, &QTabBar::currentChanged, this, [this](int index) {
         stack_->setCurrentIndex(index);
         refresh();
@@ -428,6 +437,167 @@ void ProxyPage::resizeEvent(QResizeEvent *event)
     }
 }
 
+QWidget *ProxyPage::buildKernelsPanel()
+{
+    auto *panel = new QWidget(stack_);
+    panel->setObjectName(QStringLiteral("KernelsPanel"));
+    auto *box = new QVBoxLayout(panel);
+    box->setContentsMargins(0, 0, 0, 0);
+    box->setSpacing(6);
+
+    box->addWidget(makeCardTitle(UiText::kernelSectionTitle(), panel));
+    auto *hint = new QLabel(UiText::kernelSectionHint(), panel);
+    hint->setObjectName(QStringLiteral("Subtitle"));
+    box->addWidget(hint);
+
+    auto *topRow = new QHBoxLayout();
+    topRow->setSpacing(10);
+    auto *storage = new QLabel(UiText::kernelStorageHint(), panel);
+    storage->setObjectName(QStringLiteral("Muted"));
+    topRow->addWidget(storage);
+    topRow->addStretch();
+
+    kernelCheckButton_ = new QPushButton(UiText::kernelCheckUpdates(), panel);
+    kernelCheckButton_->setEnabled(!kernelBusy_);
+    connect(kernelCheckButton_, &QPushButton::clicked, this, [this]() {
+        emit statusMessageRequested(UiText::kernelCheckingStatus());
+        reloadKernels();
+    });
+    topRow->addWidget(kernelCheckButton_);
+
+    kernelCancelButton_ = new QPushButton(UiText::kernelCancelDownload(), panel);
+    kernelCancelButton_->setObjectName(QStringLiteral("Danger"));
+    kernelCancelButton_->setVisible(kernelBusy_);
+    connect(kernelCancelButton_, &QPushButton::clicked, this, [this]() {
+        emit kernelCancelRequested();
+        emit statusMessageRequested(UiText::kernelCancellingStatus());
+    });
+    topRow->addWidget(kernelCancelButton_);
+    box->addLayout(topRow);
+
+    kernelProgressLabel_ = new QLabel(panel);
+    kernelProgressLabel_->setObjectName(QStringLiteral("Accent"));
+    kernelProgressLabel_->setVisible(kernelProgress_.has_value());
+    if (kernelProgress_.has_value()) {
+        kernelProgressLabel_->setText(kernelProgressText());
+    }
+    box->addWidget(kernelProgressLabel_);
+
+    auto *card = new QFrame(panel);
+    Theme::decorateCard(card);
+    card->setObjectName(QStringLiteral("Card"));
+    kernelTable_ = card;
+    kernelGrid_ = new QGridLayout(card);
+    kernelGrid_->setContentsMargins(Theme::kPadCard, Theme::kPadCard, Theme::kPadCard, Theme::kPadCard);
+    kernelGrid_->setSpacing(8);
+
+    layoutKernelColumns();
+    box->addWidget(card);
+    box->addStretch();
+    return panel;
+}
+
+void ProxyPage::layoutKernelColumns()
+{
+    if (kernelGrid_ == nullptr) {
+        return;
+    }
+    while (QLayoutItem *item = kernelGrid_->takeAt(0)) {
+        if (item->widget() != nullptr) {
+            delete item->widget();
+        }
+        delete item;
+    }
+
+    const QVector<QString> headers = {
+        UiText::kernelColumnKind(),
+        UiText::kernelColumnStatus(),
+        UiText::kernelColumnVersion(),
+        UiText::kernelColumnLatest(),
+        UiText::kernelColumnPath(),
+        UiText::kernelColumnAction()
+    };
+    for (int col = 0; col < headers.size(); ++col) {
+        auto *header = new QLabel(headers.at(col), kernelTable_);
+        header->setObjectName(QStringLiteral("Muted"));
+        kernelGrid_->addWidget(header, 0, col);
+    }
+
+    for (int rowIdx = 0; rowIdx < kernelRows_.size(); ++rowIdx) {
+        const KernelRow &row = kernelRows_.at(rowIdx);
+        const int gridRow = rowIdx + 1;
+
+        auto *name = new QLabel(row.name, kernelTable_);
+        name->setObjectName(QStringLiteral("Title"));
+        kernelGrid_->addWidget(name, gridRow, 0);
+
+        auto *status = new QLabel(row.statusText, kernelTable_);
+        status->setObjectName(row.statusOk ? QStringLiteral("Success") : QStringLiteral("Danger"));
+        kernelGrid_->addWidget(status, gridRow, 1);
+
+        auto *version = new QLabel(row.version, kernelTable_);
+        version->setToolTip(row.version);
+        kernelGrid_->addWidget(version, gridRow, 2);
+
+        auto *latest = new QLabel(row.latest, kernelTable_);
+        latest->setObjectName(row.latestIsWarning ? QStringLiteral("Warning") : QStringLiteral("Muted"));
+        kernelGrid_->addWidget(latest, gridRow, 3);
+
+        auto *path = new QLabel(row.path, kernelTable_);
+        path->setToolTip(row.path);
+        kernelGrid_->addWidget(path, gridRow, 4);
+
+        auto *btn = new QPushButton(row.actionText, kernelTable_);
+        btn->setEnabled(row.actionEnabled);
+        btn->setToolTip(row.hover);
+        const Kernel::Kind kind = row.kind;
+        connect(btn, &QPushButton::clicked, this, [this, kind]() {
+            emit kernelUpdateRequested(kind);
+        });
+        kernelGrid_->addWidget(btn, gridRow, 5);
+    }
+
+    kernelGrid_->setColumnStretch(0, 0);
+    kernelGrid_->setColumnStretch(1, 0);
+    kernelGrid_->setColumnStretch(2, 1);
+    kernelGrid_->setColumnStretch(3, 0);
+    kernelGrid_->setColumnStretch(4, 2);
+    kernelGrid_->setColumnStretch(5, 0);
+}
+
+void ProxyPage::reloadKernels()
+{
+    if (kernelLoading_) {
+        return;
+    }
+    kernelLoading_ = true;
+    auto kernelBox = std::make_shared<QList<Kernel::Info>>();
+    auto releaseBox = std::make_shared<QList<Kernel::ReleaseInfo>>();
+    QPointer<ProxyPage> guard(this);
+    context_.runAsync(
+        [kernelBox, releaseBox]() {
+            Kernel::Manager detector;
+            *kernelBox = detector.detectAll();
+            const QString root = QStringLiteral("data/kernels");
+            const Updater::KernelUpdater updater(root, {});
+            for (const Kernel::Info &info : *kernelBox) {
+                const Result<Kernel::ReleaseInfo> checked = updater.check(info);
+                releaseBox->push_back(Kernel::releaseInfoFromCheck(checked, info));
+            }
+        },
+        [guard, kernelBox, releaseBox]() {
+            if (guard.isNull()) {
+                return;
+            }
+            guard->kernelLoading_ = false;
+            guard->kernelInfos_ = *kernelBox;
+            guard->kernelReleases_ = *releaseBox;
+            guard->kernelRows_ = buildKernelRows(guard->kernelInfos_, guard->kernelReleases_,
+                                                 guard->kernelBusy_, guard->context_.proxy().status());
+            guard->layoutKernelColumns();
+        });
+}
+
 QWidget *ProxyPage::buildLogsPanel()
 {
     auto *panel = new QWidget(stack_);
@@ -454,10 +624,62 @@ void ProxyPage::refresh()
     if (currentPanel() == Panel::Nodes && allNodes_.isEmpty()) {
         reloadNodes();
     }
+    if (currentPanel() == Panel::Kernels) {
+        if (kernelInfos_.isEmpty() && !kernelLoading_) {
+            reloadKernels();
+        } else {
+            kernelRows_ = buildKernelRows(kernelInfos_, kernelReleases_, kernelBusy_, context_.proxy().status());
+            layoutKernelColumns();
+        }
+    }
     if (currentPanel() == Panel::Logs && logView_ != nullptr) {
         const Result<QString> log = context_.proxy().recentLog(100000);
         logView_->setPlainText(log.isOk() ? log.value() : log.error());
     }
+}
+
+QString ProxyPage::kernelRowText(int index) const
+{
+    if (index < 0 || index >= kernelRows_.size()) {
+        return QString();
+    }
+    const KernelRow &row = kernelRows_.at(index);
+    return QStringLiteral("%1 %2 %3 %4 %5 %6")
+        .arg(row.name, row.statusText, row.version, row.latest, row.path, row.actionText);
+}
+
+QString ProxyPage::kernelProgressText() const
+{
+    if (!kernelProgress_.has_value()) {
+        return QString();
+    }
+    return Gui::kernelProgressText(*kernelProgress_);
+}
+
+void ProxyPage::setKernelProgress(const std::optional<Kernel::UpdateProgress> &progress)
+{
+    kernelProgress_ = progress;
+    if (kernelProgressLabel_ != nullptr) {
+        if (progress.has_value()) {
+            kernelProgressLabel_->setText(kernelProgressText());
+            kernelProgressLabel_->setVisible(true);
+        } else {
+            kernelProgressLabel_->setVisible(false);
+        }
+    }
+}
+
+void ProxyPage::setKernelBusy(bool busy)
+{
+    kernelBusy_ = busy;
+    if (kernelCheckButton_ != nullptr) {
+        kernelCheckButton_->setEnabled(!busy);
+    }
+    if (kernelCancelButton_ != nullptr) {
+        kernelCancelButton_->setVisible(busy);
+    }
+    kernelRows_ = buildKernelRows(kernelInfos_, kernelReleases_, kernelBusy_, context_.proxy().status());
+    layoutKernelColumns();
 }
 
 QString ProxyPage::stateBadgeText() const

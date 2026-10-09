@@ -13,7 +13,7 @@ QString fromCodePoints(std::initializer_list<char32_t> points)
 
 }
 
-// geoTruncated <- geo.rs:59
+// geoTruncated <- geo.rs:-1
 // ASCII 骨架: " {} "
 QString geoTruncated()
 {
@@ -23,7 +23,7 @@ QString geoTruncated()
     });
 }
 
-// geoHtmlBody <- geo.rs:62
+// geoHtmlBody <- geo.rs:-1
 // ASCII 骨架: " HTML"
 QString geoHtmlBody()
 {
@@ -34,7 +34,7 @@ QString geoHtmlBody()
     });
 }
 
-// geoBadMagic <- geo.rs:66
+// geoBadMagic <- geo.rs:-1
 // ASCII 骨架: " geo  {:#04x}"
 QString geoBadMagic()
 {
@@ -46,7 +46,7 @@ QString geoBadMagic()
     });
 }
 
-// geoAlreadyReady <- geo.rs:89
+// geoAlreadyReady <- geo.rs:-1
 // ASCII 骨架: "{name}  {}"
 QString geoAlreadyReady()
 {
@@ -56,7 +56,7 @@ QString geoAlreadyReady()
     });
 }
 
-// geoUpdated <- geo.rs:89
+// geoUpdated <- geo.rs:-1
 // ASCII 骨架: "{name}  {} {}"
 QString geoUpdated()
 {
@@ -67,7 +67,7 @@ QString geoUpdated()
     });
 }
 
-// geoAllSourcesFailed <- geo.rs:109
+// geoAllSourcesFailed <- geo.rs:-1
 // ASCII 骨架: " {name} {}"
 QString geoAllSourcesFailed()
 {
@@ -80,7 +80,7 @@ QString geoAllSourcesFailed()
     });
 }
 
-// geoReadBodyFailed <- geo.rs:129
+// geoReadBodyFailed <- geo.rs:-1
 // ASCII 骨架: ": {error:#}"
 QString geoReadBodyFailed()
 {

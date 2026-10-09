@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gui/KernelPanel.h"
 #include "gui/Page.h"
 #include "gui/ProxyView.h"
 #include "models/Node.h"
@@ -64,6 +65,15 @@ public:
     QStringList regionPillCodes() const;
     int rowCount() const { return view_.rows.size(); }
 
+    // 内核表的可观察面（离屏测试与外壳都用这几个，不伸手拿私有控件）。
+    int kernelRowCount() const { return kernelRows_.size(); }
+    QString kernelRowText(int index) const;
+    QString kernelProgressText() const;
+    bool kernelBusy() const { return kernelBusy_; }
+    /// 外壳收到下载进度后灌进来；nullopt = 没有作业在跑，进度条整条消失。
+    void setKernelProgress(const std::optional<Kernel::UpdateProgress> &progress);
+    void setKernelBusy(bool busy);
+
 signals:
     /// 行上的动作只发信号，不在页面里动内核：切换要写系统代理、要占端口，
     /// 那些是外壳（busy / status / 切换原因"手动切换"）的职责。
@@ -72,11 +82,23 @@ signals:
     void nodeSpeedtestRequested(const QString &nodeId);
     void nodeIpRiskRequested(const QString &nodeId);
     void nodeEgressLockRequested(const QString &nodeId, const QString &nodeName);
+    /// 内核这一栏同理：起下载要占目录、要提权、要跟代理状态打架，归外壳编排。
+    void kernelUpdateRequested(Kernel::Kind kind);
+    void kernelCancelRequested();
+    /// 状态条文案由外壳持有（Rust 的 self.status 是应用级字段，不是这页的）。
+    void statusMessageRequested(const QString &message);
 
 private:
     QWidget *buildStatusCard();
     QWidget *buildLogsPanel();
     QWidget *buildNodesPanel();
+    QWidget *buildKernelsPanel();
+
+    /// 内核表的数据来源：detect_all 起子进程、check 走网络，都丢到 worker 线程，
+    /// 回 GUI 线程再拼行（Rust 的 reload_kernels 也是两条 BgMsg 先后到）。
+    void reloadKernels();
+    /// 用当前宽度重算列宽并把过长的版本/路径截断（Rust 的 add_sized + truncate）。
+    void layoutKernelColumns();
 
     /// 从库里重取一次"可用节点"（worker 线程读，回到 GUI 线程落视图）。
     void reloadNodes();
@@ -112,6 +134,19 @@ private:
     QString search_;
     ProxySortBy sortBy_ = ProxySortBy::Latency;
     quint64 dataRev_ = 0;
+
+    // 内核栏（Rust 的 kernels / kernel_releases / kernel_busy / kernel_progress）。
+    QList<Kernel::Info> kernelInfos_;
+    QList<Kernel::ReleaseInfo> kernelReleases_;
+    QList<KernelRow> kernelRows_;
+    std::optional<Kernel::UpdateProgress> kernelProgress_;
+    QWidget *kernelTable_ = nullptr;
+    QGridLayout *kernelGrid_ = nullptr;
+    QLabel *kernelProgressLabel_ = nullptr;
+    QPushButton *kernelCheckButton_ = nullptr;
+    QPushButton *kernelCancelButton_ = nullptr;
+    bool kernelBusy_ = false;
+    bool kernelLoading_ = false;
     bool nodesRequested_ = false;
 };
 

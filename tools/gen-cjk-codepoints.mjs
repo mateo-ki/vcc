@@ -131,6 +131,28 @@ const entries = [
 
   ['egressLockedStatus', 'gui/views/proxy.rs', 'self.status = format!(', 0, 'nonAscii', 'uitext'],
 
+  ['kernelSectionTitle', 'gui/views/proxy.rs', 'v2rayN', 0, 'at', 'uitext', -1, 0],
+  ['kernelSectionHint', 'gui/views/proxy.rs', 'v2rayN', 0, 'nonAscii', 'uitext'],
+  ['kernelStorageHint', 'gui/views/proxy.rs', 'GitHub Release', 0, 'nonAscii', 'uitext'],
+  ['kernelCheckUpdates', 'gui/views/proxy.rs', 'add_enabled(!self.kernel_busy, egui::Button::new(', 0, 'nonAscii', 'uitext'],
+  ['kernelCheckingStatus', 'gui/views/proxy.rs', 'self.reload_kernels();', 0, 'at', 'uitext', 1, 0],
+  ['kernelCancelDownload', 'gui/views/proxy.rs', 'if self.kernel_busy && ui.add(danger_btn(', 0, 'nonAscii', 'uitext'],
+  ['kernelCancellingStatus', 'gui/views/proxy.rs', 'self.kernel_cancel.store(true, Ordering::Relaxed)', 0, 'at', 'uitext', 1, 0],
+  ['kernelColumnKind', 'gui/views/proxy.rs', '[kind_width, 20.0],', 0, 'at', 'uitext', 1, 0],
+  ['kernelColumnStatus', 'gui/views/proxy.rs', '[status_width, 20.0],', 0, 'at', 'uitext', 1, 0],
+  ['kernelColumnVersion', 'gui/views/proxy.rs', '[version_width, 20.0],', 0, 'at', 'uitext', 1, 0],
+  ['kernelColumnLatest', 'gui/views/proxy.rs', '[latest_width, 20.0],', 0, 'at', 'uitext', 1, 0],
+  ['kernelColumnPath', 'gui/views/proxy.rs', '[path_width, 20.0],', 0, 'at', 'uitext', 1, 0],
+  ['kernelColumnAction', 'gui/views/proxy.rs', '[action_width, 20.0],', 0, 'at', 'uitext', 1, 0],
+  ['kernelStateAvailable', 'gui/views/proxy.rs', 'RichText::new(if kernel.available {', 0, 'at', 'uitext', 1, 0],
+  ['kernelStateMissing', 'gui/views/proxy.rs', 'RichText::new(if kernel.available {', 0, 'at', 'uitext', 3, 0],
+  ['kernelLatestChecking', 'gui/views/proxy.rs', 'release.latest_version.as_deref()', 0, 'at', 'uitext', 1, 0],
+  ['kernelActionUpdate', 'gui/views/proxy.rs', 'let label = if kernel.available {', 0, 'at', 'uitext', 0, 0],
+  ['kernelActionDownload', 'gui/views/proxy.rs', 'let label = if kernel.available {', 0, 'at', 'uitext', 0, 1],
+  ['kernelHoverInUse', 'gui/views/proxy.rs', 'on_hover_text(if self.proxy_status.kernel_in_use', 0, 'at', 'uitext', 1, 0],
+  ['kernelHoverAsset', 'gui/views/proxy.rs', 'SHA-256', 0, 'nonAscii', 'uitext'],
+  ['kernelProgressFormat', 'gui/views/proxy.rs', 'progress.kind.display_name(),', 0, 'at', 'uitext', -1, 0],
+  ['kernelDownloadFormat', 'gui/views/proxy.rs', 'format_bytes(progress.downloaded),', 0, 'at', 'uitext', -1, 0],
 ];
 
 // 纯 ASCII 的常量（比如 NO_PROXY 列表）直接生成字符串字面量，可读性优先；
@@ -169,6 +191,34 @@ function pickLiteral(lines, anchor, occurrence, name, mode = 'nonAscii') {
   process.exit(1);
 }
 
+/// 精确偏移取字面量：锚点行往下/往上 offset 行，取该行第 want 个非 ASCII 字面量。
+/// 用 +-3 找窗口会被相邻行的同类字面量污染（内核表头六行挨在一起，实测就串了），
+/// 所以这里由偏移量点名，并把真正命中的行号记进报告（litLine）。
+let litLine = -1;
+function pickAt(lines, anchor, occurrence, name, offset, want) {
+  const hits = [];
+  lines.forEach((line, index) => {
+    if (line.includes(anchor)) hits.push(index);
+  });
+  if (hits.length <= occurrence) {
+    console.error(`${name}: anchor "${anchor}" matched ${hits.length} line(s), want #${occurrence}`);
+    process.exit(1);
+  }
+  const index = hits[occurrence] + offset;
+  const line = lines[index];
+  if (line === undefined) {
+    console.error(`${name}: line ${index + 1} out of file`);
+    process.exit(1);
+  }
+  const found = literalsIn(line).filter(hasNonAscii);
+  if (found.length <= want) {
+    console.error(`${name}: ${found.length} non-ASCII literal(s) on line ${index + 1} (${JSON.stringify(line.trim())}), want #${want}`);
+    process.exit(1);
+  }
+  litLine = index + 1;
+  return found[want];
+}
+
 function toCppArray(text) {
   // 一律用十六进制码点：混着 "x" 字面量会让 initializer_list<char32_t> 推不出公共类型。
   return [...text].map((ch) => '0x' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
@@ -179,13 +229,22 @@ for (const target of Object.keys(outputs)) {
   buckets.set(target, { functions: [], declarations: [] });
 }
 
-for (const [name, file, anchor, occurrence, mode, target = 'sysproxy'] of entries) {
+for (const [name, file, anchor, occurrence, mode, target = 'sysproxy', offset = 0, want = 0, braces = false] of entries) {
   const lines = fs.readFileSync(RUST + '/' + file, 'utf8').split(/\r?\n/);
-  const literal = pickLiteral(lines, anchor, occurrence, name, mode);
-  const parts = toCppArray(literal);
-  const skeleton = [...literal].filter((c) => c.codePointAt(0) < 0x7f).join('');
+  litLine = -1;
+  const literal = mode === 'at'
+    ? pickAt(lines, anchor, occurrence, name, offset, want)
+    : pickLiteral(lines, anchor, occurrence, name, mode);
+  // Rust 用 {} 占位，Qt 的 arg 要 %1/%2/...；分隔符（·）照样从 Rust 抠，
+  // 这样带非 ASCII 的模板也不用我手打。
+  let templateIndex = 0;
+  const shaped = braces
+    ? literal.replace(/\{\}/g, () => `%${++templateIndex}`)
+    : literal;
+  const parts = toCppArray(shaped);
+  const skeleton = [...shaped].filter((c) => c.codePointAt(0) < 0x7f).join('');
   const body = [];
-  body.push(`// ${name} <- ${file}:${lines.indexOf(lines.find((l) => l.includes(anchor))) + 1}`);
+  body.push(`// ${name} <- ${file}:${litLine}${braces ? ' ({} -> %n)' : ''}`);
   body.push(`// ASCII 骨架: ${JSON.stringify(skeleton)}`);
   body.push('QString ' + name + '()');
   body.push('{');

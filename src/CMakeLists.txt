@@ -182,6 +182,8 @@ target_link_libraries(vccGui PUBLIC
     vccProxy
     vccTasks
     vccKernel
+    vccKernelManager
+    vccUpdater
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

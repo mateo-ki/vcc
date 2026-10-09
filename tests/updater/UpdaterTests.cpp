@@ -92,14 +92,14 @@ QString harmlessVersionStub()
     if (!cached.isEmpty()) {
         return cached;
     }
-    const QString systemRoot = qEnvironmentVariable("SystemRoot");
     QStringList candidates;
+    candidates.push_back(findProgramInPath(QStringLiteral("node.exe")));
+    const QString systemRoot = qEnvironmentVariable("SystemRoot");
     if (!systemRoot.isEmpty()) {
         candidates.push_back(QDir(systemRoot).absoluteFilePath(QStringLiteral("System32/where.exe")));
         candidates.push_back(QDir(systemRoot).absoluteFilePath(QStringLiteral("System32/ping.exe")));
     }
     candidates.push_back(findProgramInPath(QStringLiteral("git.exe")));
-    candidates.push_back(findProgramInPath(QStringLiteral("node.exe")));
 
     for (const QString &candidate : candidates) {
         const QFileInfo info(candidate);
@@ -116,8 +116,10 @@ QString harmlessVersionStub()
         if (!QFile::copy(candidate, copy)) {
             continue;
         }
-        const Result<QString> probed = Kernel::readKernelVersion(Kind::Mihomo, copy);
-        if (probed.isOk() && !probed.value().isNull() && !probed.value().isEmpty()) {
+        const Result<QString> probedCopy = Kernel::readKernelVersion(Kind::Mihomo, copy);
+        const Result<QString> probedOrig = Kernel::readKernelVersion(Kind::Mihomo, candidate);
+        if (probedCopy.isOk() && probedOrig.isOk() && probedCopy.value() == probedOrig.value()
+            && !probedCopy.value().isNull() && !probedCopy.value().isEmpty()) {
             cached = candidate;
             return cached;
         }

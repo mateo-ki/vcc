@@ -53,5 +53,27 @@ QString kernelNameFallback();
 QString switchingLabel();
 QString emptyNodeGrid();
 QString egressLockedStatus();
+QString kernelSectionTitle();
+QString kernelSectionHint();
+QString kernelStorageHint();
+QString kernelCheckUpdates();
+QString kernelCheckingStatus();
+QString kernelCancelDownload();
+QString kernelCancellingStatus();
+QString kernelColumnKind();
+QString kernelColumnStatus();
+QString kernelColumnVersion();
+QString kernelColumnLatest();
+QString kernelColumnPath();
+QString kernelColumnAction();
+QString kernelStateAvailable();
+QString kernelStateMissing();
+QString kernelLatestChecking();
+QString kernelActionUpdate();
+QString kernelActionDownload();
+QString kernelHoverInUse();
+QString kernelHoverAsset();
+QString kernelProgressFormat();
+QString kernelDownloadFormat();
 
 }

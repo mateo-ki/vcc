@@ -5,3 +5,5 @@ dist/
 vcpkg_installed/
 build*/
 dist*/
+.idea/
+cmake-build*/

@@ -95,6 +95,41 @@ TEST(ProxyPageTests, selectingAPanelMovesTheStack)
     delete page;
 }
 
+TEST(ProxyPageTests, kernelsPanelBehaviorAndProgress)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+    ProxyPage *page = makePage(context);
+
+    page->selectPanel(ProxyPage::Panel::Kernels);
+    EXPECT_EQ(page->currentPanel(), ProxyPage::Panel::Kernels);
+    auto *stack = page->findChild<QStackedWidget *>();
+    ASSERT_TRUE(stack != nullptr);
+    EXPECT_EQ(stack->currentIndex(), int(ProxyPage::Panel::Kernels));
+
+    EXPECT_FALSE(page->kernelBusy());
+    page->setKernelBusy(true);
+    EXPECT_TRUE(page->kernelBusy());
+    page->setKernelBusy(false);
+    EXPECT_FALSE(page->kernelBusy());
+
+    Kernel::UpdateProgress progress;
+    progress.kind = Kernel::Kind::Mihomo;
+    progress.stage = Kernel::UpdateStage::Downloading;
+    progress.downloaded = 1000;
+    progress.total = 2000;
+    progress.bytesPerSecond = 500;
+    page->setKernelProgress(progress);
+    EXPECT_FALSE(page->kernelProgressText().isEmpty());
+
+    page->setKernelProgress(std::nullopt);
+    EXPECT_TRUE(page->kernelProgressText().isEmpty());
+
+    delete page;
+}
+
 TEST(ProxyPageTests, badgeRuleCoversBothPreparedAndStoppedBranches)
 {
     using Proxy::ProxyState;

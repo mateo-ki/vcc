@@ -13,7 +13,7 @@ QString fromCodePoints(std::initializer_list<char32_t> points)
 
 }
 
-// softCobalt <- gui/theme.rs:199
+// softCobalt <- gui/theme.rs:-1
 // ASCII 骨架: ""
 QString softCobalt()
 {
@@ -22,7 +22,7 @@ QString softCobalt()
     });
 }
 
-// softTeal <- gui/theme.rs:200
+// softTeal <- gui/theme.rs:-1
 // ASCII 骨架: ""
 QString softTeal()
 {
@@ -31,7 +31,7 @@ QString softTeal()
     });
 }
 
-// softTerracotta <- gui/theme.rs:201
+// softTerracotta <- gui/theme.rs:-1
 // ASCII 骨架: ""
 QString softTerracotta()
 {
@@ -40,7 +40,7 @@ QString softTerracotta()
     });
 }
 
-// softIndigo <- gui/theme.rs:202
+// softIndigo <- gui/theme.rs:-1
 // ASCII 骨架: ""
 QString softIndigo()
 {
@@ -49,7 +49,7 @@ QString softIndigo()
     });
 }
 
-// softViolet <- gui/theme.rs:203
+// softViolet <- gui/theme.rs:-1
 // ASCII 骨架: ""
 QString softViolet()
 {
