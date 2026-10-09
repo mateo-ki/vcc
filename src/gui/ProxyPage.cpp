@@ -1,6 +1,7 @@
 #include "gui/ProxyPage.h"
 
 #include <QCursor>
+#include <QMouseEvent>
 #include <QFrame>
 #include <QGridLayout>
 #include <QLabel>
@@ -20,7 +21,9 @@
 
 #include "app/AppContext.h"
 #include "db/Database.h"
+#include "gui/CountryNames.h"
 #include "gui/FlowLayout.h"
+#include "gui/NodeText.h"
 #include "gui/Prepare.h"
 #include "gui/Theme.h"
 #include "gui/UiText.h"
@@ -247,25 +250,57 @@ QWidget *ProxyPage::buildNodesPanel()
 
 QWidget *ProxyPage::makeNodeRow(const ProxyViewRow &row)
 {
+    const Proxy::ProxyRuntimeStatus status = context_.proxy().status();
+    // 开了自动选路时"当前用的是谁"由内核决定，高亮要跟着内核出口走 —— 而出口名要读
+    // 控制器的 /proxies groups，那一行还没接进来，所以这里只在**没开**自动选路时高亮
+    // 手动选中的那一张（Rust 的 else 分支）。
+    // 自动选路开着时"当前用的是谁"由内核决定；关掉时才是界面上选中的这张。
+    const bool autoRouting = context_.proxy().config().urlTest;
+    const bool selected = !autoRouting && status.nodeId == row.node.id;
+
     auto *card = new QFrame(gridHost_);
     card->setObjectName(QStringLiteral("Card"));
+    card->setMinimumHeight(58);
+    card->setCursor(Qt::PointingHandCursor);
+    card->setProperty("nodeId", row.node.id);
+    card->setProperty("nodeName", row.node.name);
+    card->installEventFilter(this);
     auto *box = new QVBoxLayout(card);
-    box->setContentsMargins(10, 8, 10, 8);
-    box->setSpacing(2);
+    box->setContentsMargins(14, 11, 14, 11);
+    box->setSpacing(4);
 
     auto *name = new QLabel(row.node.name, card);
-    name->setObjectName(QStringLiteral("Title"));
+    name->setObjectName(selected ? QStringLiteral("Accent") : QStringLiteral("Title"));
+    name->setToolTip(row.node.name);
     box->addWidget(name);
 
-    QString detail = row.country;
-    if (row.node.latencyOk.has_value() && *row.node.latencyOk && row.node.latencyMs.has_value()) {
-        detail += QStringLiteral(" · %1 ms").arg(*row.node.latencyMs);
-    } else {
-        detail += QStringLiteral(" · -- ms");
+    auto *line = new QHBoxLayout();
+    line->setSpacing(8);
+    auto *protocol = new QLabel(row.node.protocol.toUpper(), card);
+    protocol->setObjectName(QStringLiteral("Muted"));
+    line->addWidget(protocol);
+    if (!row.node.country.isNull() && !row.node.country.isEmpty()) {
+        const CountryDisplay display = countryFlagAndName(row.node.country);
+        auto *where = new QLabel(
+            QStringLiteral("%1 %2").arg(display.flag, display.name), card);
+        where->setObjectName(QStringLiteral("Subtitle"));
+        line->addWidget(where);
     }
-    auto *detailLabel = new QLabel(detail, card);
-    detailLabel->setObjectName(QStringLiteral("Muted"));
-    box->addWidget(detailLabel);
+    line->addStretch();
+    const LatencyDisplay latency = latencyText(row.node);
+    auto *latencyLabel = new QLabel(latency.text, card);
+    if (!latency.role.isEmpty()) {
+        latencyLabel->setObjectName(latency.role);
+    }
+    line->addWidget(latencyLabel);
+    box->addLayout(line);
+
+    if (selected) {
+        card->setAutoFillBackground(true);
+        QPalette palette = card->palette();
+        palette.setColor(QPalette::Window, Theme::current().accentBg);
+        card->setPalette(palette);
+    }
 
     const QString nodeId = row.node.id;
     const QString nodeName = row.node.name;
@@ -291,6 +326,23 @@ QWidget *ProxyPage::makeNodeRow(const ProxyViewRow &row)
         }
     });
     return card;
+}
+
+/// 卡片本身是 QFrame，没有 clicked()：Rust 侧是 `.interact(Sense::click())`，
+/// 这里用事件过滤器补上同一个语义（左键 = 连接）。
+bool ProxyPage::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::MouseButtonRelease) {
+        auto *card = qobject_cast<QWidget *>(watched);
+        const QString nodeId = card != nullptr ? card->property("nodeId").toString() : QString();
+        if (!nodeId.isEmpty()) {
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            if (mouse->button() == Qt::LeftButton) {
+                emit nodeSwitchRequested(nodeId, card->property("nodeName").toString());
+            }
+        }
+    }
+    return Page::eventFilter(watched, event);
 }
 
 int ProxyPage::gridColumns() const
@@ -322,6 +374,14 @@ void ProxyPage::applyView()
         delete item;
     }
     const int columns = gridColumns();
+    if (view_.rows.isEmpty()) {
+        // Rust 的空态不是一大片空白：一张卡片说清"没有匹配的可用节点，请在「节点列表」
+        // 中进行测速"—— 这一页只列测通过的节点，所以没匹配就得去那一页测。
+        auto *empty = new QLabel(UiText::emptyNodeGrid(), gridHost_);
+        empty->setObjectName(QStringLiteral("Subtitle"));
+        empty->setWordWrap(true);
+        grid_->addWidget(empty, 0, 0, 1, columns);
+    }
     for (int index = 0; index < view_.rows.size(); ++index) {
         grid_->addWidget(makeNodeRow(view_.rows.at(index)), index / columns, index % columns);
     }

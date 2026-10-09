@@ -385,6 +385,63 @@ QString switchReasonManual()
     });
 }
 
+// latencyProxyFailed <- gui/widgets.rs:580
+// ASCII 骨架: ""
+QString latencyProxyFailed()
+{
+    return fromCodePoints({
+        0x4EE3, 0x7406, 0x5931, 0x8D25,
+    });
+}
+
+// latencyTcpFailed <- gui/widgets.rs:585
+// ASCII 骨架: "TCP  "
+QString latencyTcpFailed()
+{
+    return fromCodePoints({
+        0x0054, 0x0043, 0x0050, 0x5931, 0x8D25, 0x0020, 0x00B7, 0x0020,
+        0x672A, 0x9A8C, 0x8BC1,
+    });
+}
+
+// latencyUntested <- gui/widgets.rs:586
+// ASCII 骨架: ""
+QString latencyUntested()
+{
+    return fromCodePoints({
+        0x672A, 0x6D4B, 0x901F,
+    });
+}
+
+// kernelNameFallback <- gui/widgets.rs:576
+// ASCII 骨架: ""
+QString kernelNameFallback()
+{
+    return fromCodePoints({
+        0x4EE3, 0x7406,
+    });
+}
+
+// switchingLabel <- gui/widgets.rs:241
+// ASCII 骨架: "..."
+QString switchingLabel()
+{
+    return fromCodePoints({
+        0x5207, 0x6362, 0x4E2D, 0x002E, 0x002E, 0x002E,
+    });
+}
+
+// emptyNodeGrid <- gui/views/proxy.rs:659
+// ASCII 骨架: ""
+QString emptyNodeGrid()
+{
+    return fromCodePoints({
+        0x6CA1, 0x6709, 0x5339, 0x914D, 0x7684, 0x53EF, 0x7528, 0x8282,
+        0x70B9, 0xFF0C, 0x8BF7, 0x5728, 0x300C, 0x8282, 0x70B9, 0x5217,
+        0x8868, 0x300D, 0x4E2D, 0x8FDB, 0x884C, 0x6D4B, 0x901F,
+    });
+}
+
 // egressLockedStatus <- gui/views/proxy.rs:741
 // ASCII 骨架: " {name}"
 QString egressLockedStatus()

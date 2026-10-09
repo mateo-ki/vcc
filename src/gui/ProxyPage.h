@@ -87,6 +87,7 @@ private:
     QWidget *makeNodeRow(const ProxyViewRow &row);
 
     void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
     QTabBar *panels_ = nullptr;
     QStackedWidget *stack_ = nullptr;

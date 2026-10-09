@@ -46,6 +46,12 @@ QString menuSpeedtest();
 QString menuIpRisk();
 QString menuLockEgress();
 QString switchReasonManual();
+QString latencyProxyFailed();
+QString latencyTcpFailed();
+QString latencyUntested();
+QString kernelNameFallback();
+QString switchingLabel();
+QString emptyNodeGrid();
 QString egressLockedStatus();
 
 }

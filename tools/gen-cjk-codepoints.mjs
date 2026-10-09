@@ -120,6 +120,15 @@ const entries = [
   ['menuIpRisk', 'gui/views/proxy.rs', 'self.check_ip_risk_for(&node_id)', 0, 'nonAscii', 'uitext'],
   ['menuLockEgress', 'gui/views/proxy.rs', 'locked = Some((node_id.clone(), node_name.clone()))', 0, 'nonAscii', 'uitext'],
   ['switchReasonManual', 'gui/views/proxy.rs', 'self.switch_proxy_node(id, name, ', 0, 'nonAscii', 'uitext'],
+
+  // ---- gui/widgets.rs:节点行右侧的延迟文案与状态文案。 ----
+  ['latencyProxyFailed', 'gui/widgets.rs', '(Some(false), Some(GOOGLE_PROXY_TEST_KIND)) => RichText::new(', 0, 'nonAscii', 'uitext'],
+  ['latencyTcpFailed', 'gui/widgets.rs', '(Some(false), _) => RichText::new(', 0, 'nonAscii', 'uitext'],
+  ['latencyUntested', 'gui/widgets.rs', '(None, _) => RichText::new(', 0, 'nonAscii', 'uitext'],
+  ['kernelNameFallback', 'gui/widgets.rs', 'None => "', 0, 'nonAscii', 'uitext'],
+  ['switchingLabel', 'gui/widgets.rs', 'icon_label(ui, Icon::Lightning, 12.0, theme::warning());', 0, 'nonAscii', 'uitext'],
+  ['emptyNodeGrid', 'gui/views/proxy.rs', 'if view.rows.is_empty() {', 0, 'nonAscii', 'uitext'],
+
   ['egressLockedStatus', 'gui/views/proxy.rs', 'self.status = format!(', 0, 'nonAscii', 'uitext'],
 
 ];
