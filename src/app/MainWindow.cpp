@@ -1,23 +1,27 @@
 #include "app/MainWindow.h"
 
 #include <QHBoxLayout>
-#include <QPixmap>
 #include <QLabel>
+#include <QPixmap>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include "app/AppContext.h"
+#include "db/Database.h"
+#include "gui/IpRiskDialog.h"
+#include "gui/NodesPage.h"
 #include "gui/Page.h"
 #include "gui/Pages.h"
+#include "gui/ProxyPage.h"
 #include "gui/Theme.h"
 #include "gui/UiText.h"
 #include "proxy/ProxyManager.h"
+#include "speedtest/SpeedTester.h"
 
 namespace {
 
-/// Rust 的 SidePanel::left("sidebar").exact_width(220).resizable(false)。
 constexpr int kSidebarWidth = 220;
 
 struct NavEntry {
@@ -25,14 +29,13 @@ struct NavEntry {
     QString label;
 };
 
-}
+} // namespace
 
 namespace Gui {
 
 MainWindow::MainWindow(App::AppContext &context, QWidget *parent)
     : QMainWindow(parent), context_(context)
 {
-    // eframe::NativeOptions：inner 1330x800，min 960x600，标题 VPN Parser。
     setWindowTitle(QStringLiteral("VPN Parser"));
     resize(1330, 800);
     setMinimumSize(960, 600);
@@ -50,19 +53,83 @@ MainWindow::MainWindow(App::AppContext &context, QWidget *parent)
     rightBox->setSpacing(0);
 
     pages_ = new QStackedWidget(right);
-    pages_->addWidget(createProxyPage(context_, pages_));
-    pages_->addWidget(createNodesPage(context_, pages_));
+
+    auto *proxyWidget = createProxyPage(context_, pages_);
+    proxyPage_ = qobject_cast<ProxyPage *>(proxyWidget);
+    pages_->addWidget(proxyWidget);
+
+    auto *nodesWidget = createNodesPage(context_, pages_);
+    nodesPage_ = qobject_cast<NodesPage *>(nodesWidget);
+    pages_->addWidget(nodesWidget);
+
     pages_->addWidget(createSourcesPage(context_, pages_));
     pages_->addWidget(createSettingsPage(context_, pages_));
     pages_->addWidget(createApiPage(context_, pages_));
+
     rightBox->addWidget(pages_, 1);
     rightBox->addWidget(buildStatusStrip());
 
     root->addWidget(right, 1);
     setCentralWidget(central);
 
+    // 连接节点切换信号
+    auto handleNodeSwitch = [this](const QString &nodeId, const QString &nodeName) {
+        selectedNodeId_ = nodeId;
+        selectedNodeName_ = nodeName;
+
+        const auto nodeRes = context_.database().getNode(nodeId);
+        if (nodeRes.isOk()) {
+            selectedNodeServer_ = nodeRes.value().server;
+        }
+
+        if (proxyPage_ != nullptr) {
+            proxyPage_->setSelectedNode(nodeId, nodeName);
+        }
+
+        const auto status = context_.proxy().status();
+        if (status.localProxyActive()) {
+            if (nodeRes.isOk()) {
+                const auto node = nodeRes.value();
+                context_.runAsync(
+                    [this, node]() { context_.proxy().switchNode(node); },
+                    [this, nodeName]() {
+                        statusLabel_->setText(QStringLiteral("已切换到节点: %1").arg(nodeName));
+                        updateStatusControls();
+                        if (proxyPage_ != nullptr) {
+                            proxyPage_->refresh();
+                        }
+                    });
+            }
+        } else {
+            statusLabel_->setText(QStringLiteral("已选择节点: %1，可点击「启动代理」运行").arg(nodeName));
+        }
+        updateStatusControls();
+    };
+
+    if (proxyPage_ != nullptr) {
+        connect(proxyPage_, &ProxyPage::nodeSwitchRequested, this, handleNodeSwitch);
+        connect(proxyPage_, &ProxyPage::statusMessageRequested, this, [this](const QString &msg) {
+            statusLabel_->setText(msg);
+        });
+        connect(proxyPage_, &ProxyPage::nodeIpRiskRequested, this, [this](const QString &) {
+            checkIpRisk();
+        });
+    }
+
+    if (nodesPage_ != nullptr) {
+        connect(nodesPage_, &NodesPage::nodeSwitchRequested, this, handleNodeSwitch);
+    }
+
+    connect(&context_, &App::AppContext::proxyStatusChanged, this, [this]() {
+        updateStatusControls();
+        if (proxyPage_ != nullptr) {
+            proxyPage_->refresh();
+        }
+    });
+
     selectTab(Tab::Proxy);
     statusLabel_->setText(context_.proxy().status().message);
+    updateStatusControls();
 }
 
 QWidget *MainWindow::buildSidebar()
@@ -126,24 +193,186 @@ QWidget *MainWindow::buildStatusStrip()
     strip->setObjectName(QStringLiteral("StatusStrip"));
 
     auto *box = new QHBoxLayout(strip);
-    // 状态条纵向内边距 5、横向 14（Rust 2026-10-07 把按钮压矮之后跟着收的）。
-    box->setContentsMargins(14, 5, 14, 5);
+    box->setContentsMargins(14, 6, 14, 6);
     box->setSpacing(10);
 
     statusLabel_ = new QLabel(strip);
     statusLabel_->setObjectName(QStringLiteral("StatusLabel"));
-    box->addWidget(statusLabel_);
+    box->addWidget(statusLabel_, 1);
 
-    // 控制按钮（启动/停止代理、IP 检测、模式 chip、测速全部）由控制台层填进来：
-    // Rust 侧它们是 bottom-up 布局里靠右的一组，先加的在最右。
     statusActions_ = new QWidget(strip);
     statusActions_->setObjectName(QStringLiteral("StatusActions"));
+    setupStatusActions();
+    box->addWidget(statusActions_);
+
+    return strip;
+}
+
+void MainWindow::setupStatusActions()
+{
     auto *actions = new QHBoxLayout(statusActions_);
     actions->setContentsMargins(0, 0, 0, 0);
     actions->setSpacing(8);
-    box->addStretch();
-    box->addWidget(statusActions_);
-    return strip;
+
+    // 测速全部
+    btnSpeedtestAll_ = new QPushButton(QStringLiteral("测速全部"), statusActions_);
+    btnSpeedtestAll_->setToolTip(QStringLiteral("对所有订阅节点跑一轮批量测速：先 TCP 预筛，再测真实延迟"));
+    connect(btnSpeedtestAll_, &QPushButton::clicked, this, &MainWindow::speedtestAll);
+    actions->addWidget(btnSpeedtestAll_);
+
+    // 模式 chip
+    btnModeChip_ = new QPushButton(QStringLiteral("系统代理"), statusActions_);
+    btnModeChip_->setObjectName(QStringLiteral("Pill"));
+    btnModeChip_->setToolTip(QStringLiteral("点击切换 系统代理 / TUN 模式"));
+    connect(btnModeChip_, &QPushButton::clicked, this, &MainWindow::toggleProxyMode);
+    actions->addWidget(btnModeChip_);
+
+    // IP 检测
+    btnIpRisk_ = new QPushButton(QStringLiteral("IP 检测"), statusActions_);
+    btnIpRisk_->setToolTip(QStringLiteral("查节点服务器 IP 的归属（机房/住宅）与风控画像"));
+    connect(btnIpRisk_, &QPushButton::clicked, this, &MainWindow::checkIpRisk);
+    actions->addWidget(btnIpRisk_);
+
+    // 启动 / 停止代理
+    btnToggleProxy_ = new QPushButton(QStringLiteral("启动代理"), statusActions_);
+    btnToggleProxy_->setObjectName(QStringLiteral("Primary"));
+    connect(btnToggleProxy_, &QPushButton::clicked, this, &MainWindow::toggleProxy);
+    actions->addWidget(btnToggleProxy_);
+}
+
+void MainWindow::updateStatusControls()
+{
+    const auto status = context_.proxy().status();
+    const bool isRunning = status.localProxyActive();
+    const auto config = context_.proxy().config();
+
+    if (btnToggleProxy_ != nullptr) {
+        if (isRunning) {
+            btnToggleProxy_->setText(QStringLiteral("停止代理"));
+            btnToggleProxy_->setObjectName(QStringLiteral("Danger"));
+        } else {
+            btnToggleProxy_->setText(QStringLiteral("启动代理"));
+            btnToggleProxy_->setObjectName(QStringLiteral("Primary"));
+        }
+        btnToggleProxy_->setEnabled(true);
+        Theme::apply(Theme::currentId());
+    }
+
+    if (btnModeChip_ != nullptr) {
+        btnModeChip_->setText(config.mode == Proxy::ProxyMode::Tun ? QStringLiteral("🛡️ TUN 模式") : QStringLiteral("🌐 系统代理"));
+    }
+}
+
+void MainWindow::toggleProxy()
+{
+    const auto status = context_.proxy().status();
+    if (status.localProxyActive()) {
+        statusLabel_->setText(QStringLiteral("正在停止代理..."));
+        context_.runAsync(
+            [this]() { context_.proxy().stop(); },
+            [this]() {
+                statusLabel_->setText(QStringLiteral("代理已停止"));
+                updateStatusControls();
+                if (proxyPage_ != nullptr) {
+                    proxyPage_->refresh();
+                }
+            });
+    } else {
+        if (selectedNodeId_.isEmpty()) {
+            statusLabel_->setText(QStringLiteral("请先在控制台或节点池选择一个代理节点再启动"));
+            return;
+        }
+        const auto nodeRes = context_.database().getNode(selectedNodeId_);
+        if (!nodeRes.isOk()) {
+            statusLabel_->setText(QStringLiteral("无法读取选中的节点信息"));
+            return;
+        }
+        statusLabel_->setText(QStringLiteral("正在启动代理..."));
+        const auto node = nodeRes.value();
+        context_.runAsync(
+            [this, node]() { context_.proxy().start(node); },
+            [this]() {
+                const auto curStatus = context_.proxy().status();
+                if (curStatus.localProxyActive()) {
+                    statusLabel_->setText(QStringLiteral("代理已启动并生效"));
+                } else if (!curStatus.lastError.isEmpty()) {
+                    statusLabel_->setText(QStringLiteral("代理启动失败: %1").arg(curStatus.lastError));
+                }
+                updateStatusControls();
+                if (proxyPage_ != nullptr) {
+                    proxyPage_->refresh();
+                }
+            });
+    }
+}
+
+void MainWindow::checkIpRisk()
+{
+    QString targetId = selectedNodeId_;
+    QString targetName = selectedNodeName_;
+    QString targetServer = selectedNodeServer_;
+
+    const auto status = context_.proxy().status();
+    if (targetId.isEmpty() && status.localProxyActive() && !status.nodeId.isEmpty()) {
+        targetId = status.nodeId;
+        const auto nodeRes = context_.database().getNode(targetId);
+        if (nodeRes.isOk()) {
+            targetName = nodeRes.value().name;
+            targetServer = nodeRes.value().server;
+        }
+    }
+
+    if (targetServer.isEmpty()) {
+        statusLabel_->setText(QStringLiteral("请先选择一个节点再进行 IP 检测"));
+        return;
+    }
+
+    auto *dialog = new IpRiskDialog(context_, targetId, targetName, targetServer, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->exec();
+}
+
+void MainWindow::toggleProxyMode()
+{
+    const auto status = context_.proxy().status();
+    if (status.localProxyActive()) {
+        statusLabel_->setText(QStringLiteral("请先停止代理后再切换工作模式"));
+        return;
+    }
+    auto config = context_.proxy().config();
+    config.mode = (config.mode == Proxy::ProxyMode::System) ? Proxy::ProxyMode::Tun : Proxy::ProxyMode::System;
+    context_.proxy().updateConfig(config);
+    const auto json = config.toSavedJsonText();
+    if (json.isOk()) {
+        context_.database().setProxyConfigJsonText(json.value());
+    }
+    updateStatusControls();
+    statusLabel_->setText(QStringLiteral("已切换为: %1").arg(config.mode == Proxy::ProxyMode::Tun ? QStringLiteral("TUN 模式") : QStringLiteral("系统代理")));
+}
+
+void MainWindow::speedtestAll()
+{
+    statusLabel_->setText(QStringLiteral("正在启动全量节点测速..."));
+    if (btnSpeedtestAll_ != nullptr) {
+        btnSpeedtestAll_->setEnabled(false);
+    }
+    context_.runAsync(
+        [this]() {
+            Speedtest::SpeedTester tester(context_.databasePtr(), *context_.tasksPtr());
+            tester.testAllSources(Speedtest::defaultOptions());
+        },
+        [this]() {
+            if (btnSpeedtestAll_ != nullptr) {
+                btnSpeedtestAll_->setEnabled(true);
+            }
+            statusLabel_->setText(QStringLiteral("全量节点测速已完成"));
+            if (proxyPage_ != nullptr) {
+                proxyPage_->refresh();
+            }
+            if (nodesPage_ != nullptr) {
+                nodesPage_->refresh();
+            }
+        });
 }
 
 void MainWindow::selectTab(Tab tab)
@@ -168,4 +397,4 @@ QWidget *MainWindow::statusActions() const
     return statusActions_;
 }
 
-}
+} // namespace Gui

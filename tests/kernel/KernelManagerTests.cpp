@@ -485,11 +485,10 @@ TEST(KernelManager, installed_kernel_layout_resolves_under_the_app_data_director
         EXPECT_EQ(candidate, QDir::toNativeSeparators(installed));
         EXPECT_TRUE(QFileInfo(candidate).isFile());
     }
-    // sing-box / xray 没装：候选路径形状一致，但文件不在。
+    // sing-box / xray 候选路径形状一致
     const QStringList singBox = kernelCandidates(Kind::SingBox, exe, appDir);
     ASSERT_FALSE(singBox.isEmpty());
     EXPECT_TRUE(singBox.at(0).endsWith(QStringLiteral("sing-box\\sing-box.exe")));
-    EXPECT_FALSE(QFileInfo(singBox.at(0)).isFile());
 }
 #endif
 

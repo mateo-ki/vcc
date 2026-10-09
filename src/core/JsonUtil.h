@@ -109,6 +109,26 @@ inline qint64 intOr(const Json &value, const char *key, qint64 fallback)
     return fallback;
 }
 
+inline quint64 uintOr(const Json &value, const char *key, quint64 fallback)
+{
+    if (!value.is_object()) {
+        return fallback;
+    }
+    const auto found = value.find(key);
+    if (found == value.end() || found->is_null()) {
+        return fallback;
+    }
+    if (found->is_number()) {
+        return found->get<quint64>();
+    }
+    if (found->is_string()) {
+        bool ok = false;
+        const quint64 parsed = QString::fromStdString(found->get<std::string>()).toULongLong(&ok);
+        return ok ? parsed : fallback;
+    }
+    return fallback;
+}
+
 inline double doubleOr(const Json &value, const char *key, double fallback)
 {
     if (!value.is_object()) {

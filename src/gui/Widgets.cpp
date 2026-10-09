@@ -18,4 +18,10 @@ QString formatBytes(quint64 bytes)
     return QString::number(value) + QStringLiteral(" B");
 }
 
+QString formatSpeed(quint64 bytesPerSecond)
+{
+    return formatBytes(bytesPerSecond) + QStringLiteral("/s");
 }
+
+}
+

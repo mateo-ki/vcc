@@ -314,73 +314,77 @@ QString styleSheet(const Palette &pal)
     css += QStringLiteral("QLabel#DangerPill { background: %1; color: %2; border: 1px solid %3; border-radius: %4px; padding: 2px 10px; }\n")
                .arg(hexColor(pal.dangerBg), hexColor(pal.textPrimary), hexColor(pal.dangerStroke))
                .arg(kRadiusBtn);
-    // 卡片：浅色主题不描边（靠阴影 + 页面底更深一档分层），深色主题留 1px 边。
+    // 卡片：统一轻描边 + 投影分层，避免在不同显示器上糊成一片。
     css += pal.light
-               ? QStringLiteral("QFrame#Card { background: %1; border: none; border-radius: %2px; }\n")
-                     .arg(hexColor(pal.panel))
-                     .arg(kRadiusCard)
+               ? QStringLiteral("QFrame#Card { background: %1; border: 1px solid %2; border-radius: %3px; }\n")
+                     .arg(hexColor(pal.panel), hexColor(pal.borderSubtle))
+                     .arg(14)
                : QStringLiteral("QFrame#Card { background: %1; border: 1px solid %2; border-radius: %3px; }\n")
                      .arg(hexColor(pal.panel), hexColor(pal.border))
-                     .arg(kRadiusCard);
+                     .arg(14);
     css += QStringLiteral("QFrame#StatusStrip { background: %1; border-top: 1px solid %2; }\n")
                .arg(hexColor(pal.sidebar), hexColor(pal.borderSubtle));
     css += QStringLiteral(
-               "QPushButton { background: %1; color: %2; border: 1px solid %3; border-radius: %4px;"
-               " padding: %5px 6px; }\n")
-               .arg(hexColor(pal.panel), hexColor(pal.textPrimary), hexColor(pal.border))
-               .arg(kRadiusBtn)
-               .arg(13);
+               "QPushButton { background: %1; color: %2; border: 1px solid %3; border-radius: 8px;"
+               " padding: 6px 14px; font-size: 13px; font-weight: 500; min-height: 18px; }\n")
+               .arg(hexColor(pal.panel), hexColor(pal.textPrimary), hexColor(pal.border));
     css += QStringLiteral("QPushButton:hover { background: %1; border-color: %2; }\n")
                .arg(hexColor(pal.panelHover), hexColor(pal.accent));
     css += QStringLiteral("QPushButton:pressed { background: %1; border-color: %2; }\n")
                .arg(hexColor(pal.panelHover), hexColor(pal.accentHover));
-    css += QStringLiteral("QPushButton:disabled { color: %1; border-color: %2; }\n")
-               .arg(hexColor(pal.muted), hexColor(pal.borderSubtle));
+    css += QStringLiteral("QPushButton:disabled { color: %1; border-color: %2; background: %3; }\n")
+               .arg(hexColor(pal.muted), hexColor(pal.borderSubtle), hexColor(pal.panelHover));
     css += QStringLiteral(
-               "QPushButton#Primary { background: %1; color: %2; border: none; border-radius: %3px;"
-               " padding: %5px 6px; font-weight: 700; }\n")
-               .arg(hexColor(pal.primaryBtn), hexColor(pal.onPrimary)).arg(kRadiusBtn).arg(13);
-    css += QStringLiteral("QPushButton#Primary:hover { background: %1; }\n").arg(hexColor(pal.primaryBtnHover));
-    css += QStringLiteral("QPushButton#Primary:pressed { background: %1; }\n").arg(hexColor(pal.primaryBtnPress));
+               "QPushButton#Primary { background: %1; color: %2; border: 1px solid %1; border-radius: 8px;"
+               " padding: 6px 16px; font-size: 13px; font-weight: 700; min-height: 18px; }\n")
+               .arg(hexColor(pal.primaryBtn), hexColor(pal.onPrimary));
+    css += QStringLiteral("QPushButton#Primary:hover { background: %1; border-color: %1; }\n").arg(hexColor(pal.primaryBtnHover));
+    css += QStringLiteral("QPushButton#Primary:pressed { background: %1; border-color: %1; }\n").arg(hexColor(pal.primaryBtnPress));
     css += QStringLiteral(
-               "QPushButton#Danger { background: %1; color: %2; border: 1px solid %3; border-radius: %4px; }\n")
-               .arg(hexColor(pal.dangerBg), hexColor(pal.danger), hexColor(pal.dangerStroke))
-               .arg(kRadiusBtn);
+               "QPushButton#Danger { background: %1; color: %2; border: 1px solid %3; border-radius: 8px;"
+               " padding: 6px 14px; font-size: 13px; font-weight: 700; min-height: 18px; }\n")
+               .arg(hexColor(pal.dangerBg), hexColor(pal.danger), hexColor(pal.dangerStroke));
+    css += QStringLiteral(
+               "QPushButton#Small { padding: 3px 8px; border-radius: 6px; font-size: 12px; min-height: 14px; }\n");
     css += QStringLiteral(
                "QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-               " background: %1; color: %2; border: 1px solid %3; border-radius: %4px; padding: 5px 8px; }\n")
-               .arg(hexColor(pal.panel), hexColor(pal.textPrimary), hexColor(pal.border))
-               .arg(kRadiusBtn - 6);
-    css += QStringLiteral("QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus { border-color: %1; }\n")
+               " background: %1; color: %2; border: 1px solid %3; border-radius: 6px; padding: 6px 10px; font-size: 13px; min-height: 20px; }\n")
+               .arg(hexColor(pal.panel), hexColor(pal.textPrimary), hexColor(pal.border));
+    css += QStringLiteral("QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus { border-color: %1; }\n")
                .arg(hexColor(pal.accent));
     css += QStringLiteral("QComboBox QAbstractItemView { background: %1; color: %2; border: 1px solid %3; selection-background-color: %4; selection-color: %5; }\n")
                .arg(hexColor(pal.panel), hexColor(pal.textPrimary), hexColor(pal.border),
                     hexColor(pal.accentBg), hexColor(pal.accentStrong));
-    css += QStringLiteral("QCheckBox, QRadioButton { background: transparent; color: %1; }\n")
+    css += QStringLiteral("QCheckBox, QRadioButton { background: transparent; color: %1; spacing: 6px; font-size: 13px; }\n")
                .arg(hexColor(pal.textPrimary));
-    css += QStringLiteral("QGroupBox { background: transparent; color: %1; border: 1px solid %2; border-radius: %3px; margin-top: 8px; }\n")
-               .arg(hexColor(pal.textSecondary), hexColor(pal.borderSubtle)).arg(kRadiusCard - 6);
-    css += QStringLiteral("QGroupBox::title { subcontrol-origin: margin; left: 10px; }\n");
+    css += QStringLiteral("QGroupBox { background: transparent; color: %1; border: 1px solid %2; border-radius: 10px; margin-top: 10px; padding-top: 8px; }\n")
+               .arg(hexColor(pal.textSecondary), hexColor(pal.borderSubtle));
+    css += QStringLiteral("QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }\n");
     css += QStringLiteral(
-               "QTableView, QTreeView, QListWidget { background: %1; alternate-background-color: %2;"
-               " color: %3; border: 1px solid %4; gridline-color: %5; selection-background-color: %6;"
-               " selection-color: %7; }\n")
+               "QTableView, QTableWidget, QTreeView, QListWidget { background: %1; alternate-background-color: %2;"
+               " color: %3; border: 1px solid %4; border-radius: 8px; gridline-color: transparent; selection-background-color: %5;"
+               " selection-color: %6; outline: none; }\n")
                .arg(hexColor(pal.panel), hexColor(pal.panelHover), hexColor(pal.textPrimary),
-                    hexColor(pal.border), hexColor(pal.borderSubtle), hexColor(pal.accentBg),
-                    hexColor(pal.accentStrong));
-    css += QStringLiteral("QHeaderView::section { background: %1; color: %2; border: none; padding: 6px 8px; font-weight: 700; }\n")
-               .arg(hexColor(pal.panelHover), hexColor(pal.muted));
+                    hexColor(pal.border), hexColor(pal.accentBg), hexColor(pal.accentStrong));
+    css += QStringLiteral("QTableView::item, QTableWidget::item { padding: 6px 8px; border: none; }\n");
+    css += QStringLiteral("QHeaderView::section { background: %1; color: %2; border: none; border-bottom: 1px solid %3; padding: 8px 10px; font-weight: 700; font-size: 12px; }\n")
+               .arg(hexColor(pal.panelHover), hexColor(pal.muted), hexColor(pal.border));
     css += QStringLiteral("QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }\n");
     css += QStringLiteral("QScrollBar:horizontal { background: transparent; height: 10px; margin: 0; }\n");
     css += QStringLiteral("QScrollBar::handle { background: %1; border-radius: 5px; min-height: 24px; }\n")
                .arg(pal.light ? rgbaColor(pal.textPrimary, 40) : hexColor(pal.border));
     css += QStringLiteral("QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }\n");
     css += QStringLiteral("QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }\n");
-    css += QStringLiteral("QTabBar::tab { background: transparent; color: %1; padding: 6px 12px; border-radius: %2px; }\n")
-               .arg(hexColor(pal.muted)).arg(kRadiusBtn);
-    css += QStringLiteral("QTabBar::tab:selected { background: %1; color: %2; }\n")
-               .arg(hexColor(pal.accentBg), hexColor(pal.accentStrong));
-    css += QStringLiteral("QToolTip { background: %1; color: %2; border: 1px solid %3; }\n")
+    css += QStringLiteral("QTabBar { background: transparent; border: none; }\n");
+    css += QStringLiteral("QTabBar::base { border: none; }\n");
+    css += QStringLiteral("QTabBar::tab { background: %1; color: %2; border: 1px solid %3; border-radius: 8px; padding: 7px 16px; margin-right: 8px; margin-top: 2px; margin-bottom: 2px; font-weight: 600; font-size: 13px; }\n")
+               .arg(hexColor(pal.panel), hexColor(pal.muted), hexColor(pal.borderSubtle));
+    css += QStringLiteral("QTabBar::tab:hover { background: %1; color: %2; border-color: %3; }\n")
+               .arg(hexColor(pal.panelHover), hexColor(pal.textPrimary), hexColor(pal.border));
+    css += QStringLiteral("QTabBar::tab:selected { background: %1; color: %2; border: 1px solid %3; font-weight: 700; }\n")
+               .arg(hexColor(pal.accentBg), hexColor(pal.accentStrong), hexColor(pal.accent));
+    css += QStringLiteral("QPlainTextEdit#LogView { background: #161a22; color: #e6edf3; font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace; font-size: 12px; border: 1px solid #30363d; border-radius: 8px; padding: 10px; }\n");
+    css += QStringLiteral("QToolTip { background: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 4px 8px; }\n")
                .arg(hexColor(pal.panel), hexColor(pal.textPrimary), hexColor(pal.border));
     return css;
 }
