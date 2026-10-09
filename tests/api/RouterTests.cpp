@@ -142,7 +142,11 @@ TEST_F(ProbeFixture, StaticSegmentBeatsParamSegment)
     // /api/nodes/{id}/speedtest 与 /api/nodes/speedtest 也不串台。
     const Response literal =
         dispatch(authorized(QStringLiteral("POST"), QStringLiteral("/api/nodes/speedtest")));
-    EXPECT_EQ(literal.status, 415); // 走到 speedtest_all 的 body 提取：没给 Content-Type
+    // 字面量路由不能被 {id} 抢走。状态码这边 axum 的规则是查实过的：
+    // speedtest_all 的 body 是 Option<Json<T>>，而 OptionalFromRequest 只在
+    // "带了 Content-Type 却不是 JSON"时才 415，**根本没带 Content-Type 就给 None**
+    // → handler 正常跑完 → 200。所以这里期望 200，靠 oneCalls=0 证明没串到 {id} 那条。
+    EXPECT_EQ(literal.status, 200); // 走到 speedtest_all：没给 Content-Type 就是 body=None
     EXPECT_EQ(fixture->speedtest->oneCalls, 0);
 
     const Response templated = dispatch(
