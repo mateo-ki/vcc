@@ -213,4 +213,187 @@ QString prepared()
     });
 }
 
+// regionLabel <- gui/views/proxy.rs:506
+// ASCII 骨架: ":"
+QString regionLabel()
+{
+    return fromCodePoints({
+        0x5730, 0x533A, 0x003A,
+    });
+}
+
+// regionAll <- gui/views/proxy.rs:507
+// ASCII 骨架: ""
+QString regionAll()
+{
+    return fromCodePoints({
+        0x5168, 0x90E8,
+    });
+}
+
+// regionHK <- gui/views/proxy.rs:508
+// ASCII 骨架: ""
+QString regionHK()
+{
+    return fromCodePoints({
+        0x9999, 0x6E2F,
+    });
+}
+
+// regionJP <- gui/views/proxy.rs:509
+// ASCII 骨架: ""
+QString regionJP()
+{
+    return fromCodePoints({
+        0x65E5, 0x672C,
+    });
+}
+
+// regionUS <- gui/views/proxy.rs:510
+// ASCII 骨架: ""
+QString regionUS()
+{
+    return fromCodePoints({
+        0x7F8E, 0x56FD,
+    });
+}
+
+// regionSG <- gui/views/proxy.rs:511
+// ASCII 骨架: ""
+QString regionSG()
+{
+    return fromCodePoints({
+        0x65B0, 0x52A0, 0x5761,
+    });
+}
+
+// regionTW <- gui/views/proxy.rs:512
+// ASCII 骨架: ""
+QString regionTW()
+{
+    return fromCodePoints({
+        0x53F0, 0x6E7E,
+    });
+}
+
+// regionKR <- gui/views/proxy.rs:513
+// ASCII 骨架: ""
+QString regionKR()
+{
+    return fromCodePoints({
+        0x97E9, 0x56FD,
+    });
+}
+
+// regionOther <- gui/views/proxy.rs:514
+// ASCII 骨架: ""
+QString regionOther()
+{
+    return fromCodePoints({
+        0x5176, 0x5B83,
+    });
+}
+
+// sortLabel <- gui/views/proxy.rs:535
+// ASCII 骨架: ":"
+QString sortLabel()
+{
+    return fromCodePoints({
+        0x6392, 0x5E8F, 0x003A,
+    });
+}
+
+// sortByLatency <- gui/views/proxy.rs:538
+// ASCII 骨架: ""
+QString sortByLatency()
+{
+    return fromCodePoints({
+        0x5EF6, 0x8FDF,
+    });
+}
+
+// sortByName <- gui/views/proxy.rs:544
+// ASCII 骨架: ""
+QString sortByName()
+{
+    return fromCodePoints({
+        0x540D, 0x79F0,
+    });
+}
+
+// nodeCountTotal <- gui/views/proxy.rs:552
+// ASCII 骨架: " {} "
+QString nodeCountTotal()
+{
+    return fromCodePoints({
+        0x5171, 0x0020, 0x007B, 0x007D, 0x0020, 0x4E2A, 0x8282, 0x70B9,
+    });
+}
+
+// searchHint <- gui/views/proxy.rs:575
+// ASCII 骨架: "..."
+QString searchHint()
+{
+    return fromCodePoints({
+        0x641C, 0x7D22, 0x8282, 0x70B9, 0x002E, 0x002E, 0x002E,
+    });
+}
+
+// menuDetails <- gui/views/proxy.rs:702
+// ASCII 骨架: ""
+QString menuDetails()
+{
+    return fromCodePoints({
+        0x67E5, 0x770B, 0x8BE6, 0x60C5,
+    });
+}
+
+// menuSpeedtest <- gui/views/proxy.rs:709
+// ASCII 骨架: ""
+QString menuSpeedtest()
+{
+    return fromCodePoints({
+        0x6D4B, 0x901F, 0x8282, 0x70B9,
+    });
+}
+
+// menuIpRisk <- gui/views/proxy.rs:713
+// ASCII 骨架: "IP "
+QString menuIpRisk()
+{
+    return fromCodePoints({
+        0x0049, 0x0050, 0x0020, 0x68C0, 0x6D4B,
+    });
+}
+
+// menuLockEgress <- gui/views/proxy.rs:719
+// ASCII 骨架: ""
+QString menuLockEgress()
+{
+    return fromCodePoints({
+        0x9501, 0x5B9A, 0x4E3A, 0x51FA, 0x53E3, 0xFF08, 0x5173, 0x95ED,
+        0x81EA, 0x52A8, 0x9009, 0x8DEF, 0xFF09,
+    });
+}
+
+// switchReasonManual <- gui/views/proxy.rs:733
+// ASCII 骨架: ""
+QString switchReasonManual()
+{
+    return fromCodePoints({
+        0x624B, 0x52A8, 0x5207, 0x6362,
+    });
+}
+
+// egressLockedStatus <- gui/views/proxy.rs:741
+// ASCII 骨架: " {name}"
+QString egressLockedStatus()
+{
+    return fromCodePoints({
+        0x5DF2, 0x5173, 0x95ED, 0x81EA, 0x52A8, 0x9009, 0x8DEF, 0xFF0C,
+        0x51FA, 0x53E3, 0x9501, 0x5B9A, 0x4E3A, 0x0020, 0x007B, 0x006E,
+        0x0061, 0x006D, 0x0065, 0x007D,
+    });
+}
+
 }

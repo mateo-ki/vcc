@@ -275,6 +275,23 @@ QString styleSheet(const Palette &pal)
     css += QStringLiteral("QPushButton#Nav:hover { background: %1; }\n").arg(hexColor(pal.panelHover));
     css += QStringLiteral("QPushButton#Nav:checked { background: %1; color: %2; font-weight: 700; }\n")
                .arg(hexColor(pal.accentBg), hexColor(pal.accentStrong));
+    // 筛选条上的小药丸（地区/排序）：选中态是淡强调底 + 压深后的字 + 强调描边，
+    // 与 Rust 的 proxy_panel_tab / 地区药丸同一套形状。
+    const QString pillBase = pal.light
+        ? QStringLiteral("QPushButton#Pill { background: %1; color: %2; border: 1px solid transparent;"
+                         " border-radius: 12px; padding: 3px 10px; font-size: 12px; }")
+              .arg(hexColor(pal.panel), hexColor(pal.muted))
+        : QStringLiteral("QPushButton#Pill { background: transparent; color: %1;"
+                         " border: 1px solid transparent; border-radius: 12px; padding: 3px 10px; }")
+              .arg(hexColor(pal.muted));
+    css += pillBase + QLatin1Char('\n');
+    css += QStringLiteral("QPushButton#Pill:hover { background: %1; color: %2; }")
+               .arg(hexColor(pal.panelHover), hexColor(pal.textPrimary))
+        + QLatin1Char('\n');
+    css += QStringLiteral("QPushButton#Pill:checked { background: %1; color: %2;"
+                          " border: 1px solid %3; font-weight: 700; }")
+               .arg(hexColor(pal.accentBg), hexColor(pal.accentStrong), hexColor(pal.accent))
+        + QLatin1Char('\n');
     css += QStringLiteral("QLabel#PageTitle { background: transparent; color: %1; font-size: 20px; font-weight: 700; }\n")
                .arg(hexColor(pal.textPrimary));
     css += QStringLiteral("QLabel#Title { background: transparent; color: %1; font-weight: 700; }\n")

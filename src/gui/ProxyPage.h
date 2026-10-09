@@ -1,9 +1,13 @@
 #pragma once
 
 #include "gui/Page.h"
+#include "gui/ProxyView.h"
+#include "models/Node.h"
 #include "proxy/MihomoConfig.h"
 
 #include <QString>
+#include <QStringList>
+#include <QVector>
 
 namespace Gui {
 
@@ -20,8 +24,13 @@ StatusBadge statusBadgeFor(Proxy::ProxyState state, bool hasKernel, bool proxyAc
 }
 
 QT_BEGIN_NAMESPACE
+class QGridLayout;
 class QLabel;
+class QLineEdit;
 class QPlainTextEdit;
+class QPushButton;
+class QResizeEvent;
+class QScrollArea;
 class QStackedWidget;
 class QTabBar;
 QT_END_NAMESPACE
@@ -48,10 +57,36 @@ public:
     QString stateBadgeText() const;
     QString stateMessageText() const;
     QString kernelInfoText() const;
+    QString regionFilter() const { return regionFilter_; }
+    QString searchText() const { return search_; }
+    ProxySortBy sortBy() const { return sortBy_; }
+    QString countText() const;
+    QStringList regionPillCodes() const;
+    int rowCount() const { return view_.rows.size(); }
+
+signals:
+    /// 行上的动作只发信号，不在页面里动内核：切换要写系统代理、要占端口，
+    /// 那些是外壳（busy / status / 切换原因"手动切换"）的职责。
+    void nodeSwitchRequested(const QString &nodeId, const QString &nodeName);
+    void nodeDetailsRequested(const QString &nodeId);
+    void nodeSpeedtestRequested(const QString &nodeId);
+    void nodeIpRiskRequested(const QString &nodeId);
+    void nodeEgressLockRequested(const QString &nodeId, const QString &nodeName);
 
 private:
     QWidget *buildStatusCard();
     QWidget *buildLogsPanel();
+    QWidget *buildNodesPanel();
+
+    /// 从库里重取一次"可用节点"（worker 线程读，回到 GUI 线程落视图）。
+    void reloadNodes();
+    /// 按 (地区, 搜索, 排序) 重画栅格；视图本身由 buildProxyView 算。
+    void applyView();
+    /// 列数跟着宽度走：>=920 四列，>=660 三列，否则两列（Rust 同源）。
+    int gridColumns() const;
+    QWidget *makeNodeRow(const ProxyViewRow &row);
+
+    void resizeEvent(QResizeEvent *event) override;
 
     QTabBar *panels_ = nullptr;
     QStackedWidget *stack_ = nullptr;
@@ -59,6 +94,24 @@ private:
     QLabel *stateMessage_ = nullptr;
     QLabel *kernelInfo_ = nullptr;
     QPlainTextEdit *logView_ = nullptr;
+
+    // 可用节点栅格的视图状态（对应 Rust 的 proxy_region_filter / proxy_search /
+    // proxy_sort_by / proxy_nodes / proxy_nodes_rev / proxy_view）。
+    QVector<Models::NodeSummary> allNodes_;
+    ProxyView view_;
+    QScrollArea *nodeScroll_ = nullptr;
+    QGridLayout *grid_ = nullptr;
+    QWidget *gridHost_ = nullptr;
+    QLabel *countLabel_ = nullptr;
+    QLineEdit *searchEdit_ = nullptr;
+    QVector<QPushButton *> regionPills_;
+    QPushButton *sortLatency_ = nullptr;
+    QPushButton *sortName_ = nullptr;
+    QString regionFilter_ = QStringLiteral("all");
+    QString search_;
+    ProxySortBy sortBy_ = ProxySortBy::Latency;
+    quint64 dataRev_ = 0;
+    bool nodesRequested_ = false;
 };
 
 QWidget *createProxyPage(App::AppContext &context, QWidget *parent = nullptr);

@@ -98,6 +98,30 @@ const entries = [
   ['preparedDownloading', 'gui/views/proxy.rs', 'crate::gui::prepare::MAX_AUTO_ATTEMPTS', 0, 'nonAscii', 'uitext'],
   ['prepared', 'gui/views/proxy.rs', '(text, theme::accent())', 0, 'nonAscii', 'uitext'],
 
+  // ---- gui/views/proxy.rs：可用节点栅格的筛选条。 ----
+  ['regionLabel', 'gui/views/proxy.rs', 'let regions = [', 0, 'nonAscii', 'uitext'],
+  ['regionAll', 'gui/views/proxy.rs', '("all", ', 0, 'nonAscii', 'uitext'],
+  ['regionHK', 'gui/views/proxy.rs', '("HK", ', 0, 'nonAscii', 'uitext'],
+  ['regionJP', 'gui/views/proxy.rs', '("JP", ', 0, 'nonAscii', 'uitext'],
+  ['regionUS', 'gui/views/proxy.rs', '("US", ', 0, 'nonAscii', 'uitext'],
+  ['regionSG', 'gui/views/proxy.rs', '("SG", ', 0, 'nonAscii', 'uitext'],
+  ['regionTW', 'gui/views/proxy.rs', '("TW", ', 0, 'nonAscii', 'uitext'],
+  ['regionKR', 'gui/views/proxy.rs', '("KR", ', 0, 'nonAscii', 'uitext'],
+  ['regionOther', 'gui/views/proxy.rs', '("OTHER", ', 0, 'nonAscii', 'uitext'],
+  ['sortLabel', 'gui/views/proxy.rs', 'let is_lat = self.proxy_sort_by ==', 0, 'nonAscii', 'uitext'],
+  ['sortByLatency', 'gui/views/proxy.rs', 'selectable_icon_btn(Icon::Lightning,', 0, 'nonAscii', 'uitext'],
+  ['sortByName', 'gui/views/proxy.rs', 'selectable_icon_btn(Icon::Sort,', 0, 'nonAscii', 'uitext'],
+  ['nodeCountTotal', 'gui/views/proxy.rs', 'self.proxy_nodes.len())', 0, 'nonAscii', 'uitext'],
+  ['searchHint', 'gui/views/proxy.rs', '.hint_text(', 0, 'nonAscii', 'uitext'],
+
+  // ---- 行右键菜单与切换原因（缺一条就得自己编中文，那是禁止的）。 ----
+  ['menuDetails', 'gui/views/proxy.rs', 'self.show_node(node_id.clone())', 0, 'nonAscii', 'uitext'],
+  ['menuSpeedtest', 'gui/views/proxy.rs', 'self.speedtest_one(node_id.clone())', 0, 'nonAscii', 'uitext'],
+  ['menuIpRisk', 'gui/views/proxy.rs', 'self.check_ip_risk_for(&node_id)', 0, 'nonAscii', 'uitext'],
+  ['menuLockEgress', 'gui/views/proxy.rs', 'locked = Some((node_id.clone(), node_name.clone()))', 0, 'nonAscii', 'uitext'],
+  ['switchReasonManual', 'gui/views/proxy.rs', 'self.switch_proxy_node(id, name, ', 0, 'nonAscii', 'uitext'],
+  ['egressLockedStatus', 'gui/views/proxy.rs', 'self.status = format!(', 0, 'nonAscii', 'uitext'],
+
 ];
 
 // 纯 ASCII 的常量（比如 NO_PROXY 列表）直接生成字符串字面量，可读性优先；

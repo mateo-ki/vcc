@@ -27,5 +27,25 @@ QString stateFailed();
 QString preparedFailed();
 QString preparedDownloading();
 QString prepared();
+QString regionLabel();
+QString regionAll();
+QString regionHK();
+QString regionJP();
+QString regionUS();
+QString regionSG();
+QString regionTW();
+QString regionKR();
+QString regionOther();
+QString sortLabel();
+QString sortByLatency();
+QString sortByName();
+QString nodeCountTotal();
+QString searchHint();
+QString menuDetails();
+QString menuSpeedtest();
+QString menuIpRisk();
+QString menuLockEgress();
+QString switchReasonManual();
+QString egressLockedStatus();
 
 }
