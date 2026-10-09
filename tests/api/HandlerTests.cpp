@@ -151,20 +151,66 @@ TEST_F(HandlerFixture, UpdateSettingsRejectsWrongTypeWith422)
     EXPECT_TRUE(ApiTest::bodyText(response).contains("invalid type: string \"nope\""));
 }
 
+/// 拒绝体逐字比对。左边那些期望串不是推出来的：每个都拿本机同形状的 serde 结构
+/// 跑过，再按 axum 0.8.9 的分流贴上前缀（Syntax/Eof = 400，Data = 422）。
+/// 列号是**字节**位：标量报最后一个字节，容器报开括号前一字节，缺字段报 body 末尾。
+TEST_F(HandlerFixture, SerdeRejectionBodiesAreByteExact)
+{
+    struct Case
+    {
+        const char *method;
+        const char *target;
+        const char *body;
+        int status;
+        const char *expect;
+    };
+    static const Case cases[] = {        {"PUT", "/api/settings", R"({"close_to_tray":"nope"})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: string "nope", expected a boolean at line 1 column 23)"},        {"PUT", "/api/settings", R"({"fetch_concurrency":-3})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid value: integer `-3`, expected u32 at line 1 column 23)"},        {"PUT", "/api/settings", R"({"fetch_concurrency":1.5})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: floating point `1.5`, expected u32 at line 1 column 24)"},        {"PUT", "/api/settings", R"({"fetch_concurrency":0.1})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: floating point `0.1`, expected u32 at line 1 column 24)"},        {"PUT", "/api/settings", R"({"fetch_concurrency":4294967296})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid value: integer `4294967296`, expected u32 at line 1 column 31)"},        {"PUT", "/api/settings", R"({"fetch_concurrency":[1]})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: sequence, expected u32 at line 1 column 21)"},        {"PUT", "/api/settings", R"({"fetch_concurrency":{}})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: map, expected u32 at line 1 column 21)"},        {"PUT", "/api/settings", R"({"exclude_keywords":5})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: integer `5`, expected a string at line 1 column 21)"},        {"PUT", "/api/settings", R"({"speedtest_timeout_ms":true,"close_to_tray":"x"})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: boolean `true`, expected u32 at line 1 column 28)"},        {"POST", "/api/sources", R"({})", 422,
+         R"(Failed to deserialize the JSON body into the target type: missing field `name` at line 1 column 2)"},        {"POST", "/api/sources", R"({"name":"x"})", 422,
+         R"(Failed to deserialize the JSON body into the target type: missing field `url_template` at line 1 column 12)"},        {"POST", "/api/sources", R"({"url_template":1,"name":2})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: integer `1`, expected a string at line 1 column 17)"},        {"POST", "/api/sources", R"({"name":"x","url_template":"y","remark":3,"enabled":true})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: integer `3`, expected a string at line 1 column 41)"},        {"POST", "/api/proxy/start", R"({})", 422,
+         R"(Failed to deserialize the JSON body into the target type: missing field `node_id` at line 1 column 2)"},        {"POST", "/api/proxy/start", R"({"node_id":5})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: integer `5`, expected a string at line 1 column 12)"},        {"POST", "/api/proxy/start", R"({"node_id":"a","kernel":"bogus"})", 422,
+         R"(Failed to deserialize the JSON body into the target type: unknown variant `bogus`, expected one of `auto`, `mihomo`, `sing_box`, `xray` at line 1 column 31)"},        {"POST", "/api/proxy/start", R"({"kernel":3})", 400,
+         R"(Failed to parse the request body as JSON: expected value at line 1 column 11)"},        {"POST", "/api/kernels/update", R"({"kind":"bogus"})", 422,
+         R"(Failed to deserialize the JSON body into the target type: unknown variant `bogus`, expected one of `mihomo`, `xray`, `sing_box` at line 1 column 15)"},        {"POST", "/api/kernels/update", R"({"kind":true})", 400,
+         R"(Failed to parse the request body as JSON: expected value at line 1 column 9)"},        {"POST", "/api/kernels/update", R"({})", 422,
+         R"(Failed to deserialize the JSON body into the target type: missing field `kind` at line 1 column 2)"},        {"POST", "/api/gist/discover", R"({"max_pages":-1})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid value: integer `-1`, expected usize at line 1 column 15)"},        {"POST", "/api/gist/discover", R"({"query":5,"max_pages":"x"})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: integer `5`, expected a string at line 1 column 10)"},        {"POST", "/api/gist/discover", R"({"query":"x","max_pages":[2]})", 422,
+         R"(Failed to deserialize the JSON body into the target type: invalid type: sequence, expected usize at line 1 column 25)"},    };
+    for (const Case &item : cases) {
+        const Response response = call(QString::fromLatin1(item.method),
+                                       QString::fromLatin1(item.target), QByteArray(item.body));
+        EXPECT_EQ(response.status, item.status) << item.body;
+        EXPECT_EQ(ApiTest::bodyText(response).toStdString(), std::string(item.expect)) << item.body;
+    }
+}
+
 TEST_F(HandlerFixture, SettingsBodyMustBeJson)
 {
     EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"), QByteArray("{}"),
                   QStringLiteral("text/plain"))
                   .status,
               415);
-    // 三条都是"内容类型对、body 不成 JSON"：axum 0.8 一律 422（415 只给内容类型不对的）。
-    EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"), QByteArray()).status, 422);
+    // axum 按 serde_json 的 category 分流：Syntax/Eof → JsonSyntaxError = 400，
+    // Data（内容对但形状不对）→ JsonDataError = 422，415 只给内容类型不对的。
+    EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"), QByteArray()).status, 400);
     EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"), QByteArray("[]")).status,
               422);
     EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"),
                   QByteArray("{\"close_to_tray\": tru e}"))
                   .status,
-              422);
+              400);
 }
 
 // ---------------------------------------------------------------------------
@@ -496,9 +542,9 @@ TEST_F(HandlerFixture, ProxyLogClampsMaxChars)
 
 TEST_F(HandlerFixture, ProxyStartValidatesNodeAndKernel)
 {
-    // 测试助手默认带 application/json，所以空 body 走的是语法拒绝（422），不是 415。
+    // 测试助手默认带 application/json，所以空 body 走的是语法拒绝（400），不是 415。
     const Response noBody = call(QStringLiteral("POST"), QStringLiteral("/api/proxy/start"));
-    EXPECT_EQ(noBody.status, 422);
+    EXPECT_EQ(noBody.status, 400);
 
     const Response missingField = call(QStringLiteral("POST"), QStringLiteral("/api/proxy/start"),
                                       QByteArray("{}"));

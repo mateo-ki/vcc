@@ -123,23 +123,84 @@ UnsignedParse parseStrictUnsigned(const QString &text)
     return result;
 }
 
-/// serde 描述 JSON 值类型的名字（`invalid type: sequence, expected struct X`）。
+/// Rust `{:?}` 对 &str 的转义（引号、反斜杠、常见控制符，其余 `\u{...}`）。
+/// serde 的 `string {:?}` 就是它，所以拒绝体里的值必须这么写。
+/// 反斜杠与引号一律用码点构造：这段代码是脚本生成的，字面量里的反斜杠容易在
+/// 多层转义里变形。
+QString rustDebugQuoted(const QString &text)
+{
+    const QChar backslash(char16_t(0x5C));
+    const QChar quotation(char16_t(0x22));
+    QString out(quotation);
+    for (const QChar ch : text) {
+        const ushort code = ch.unicode();
+        if (code == 0x22) {
+            out += backslash;
+            out += quotation;
+        } else if (code == 0x5C) {
+            out += backslash;
+            out += backslash;
+        } else if (code == 0x0A) {
+            out += backslash;
+            out += QLatin1Char('n');
+        } else if (code == 0x0D) {
+            out += backslash;
+            out += QLatin1Char('r');
+        } else if (code == 0x09) {
+            out += backslash;
+            out += QLatin1Char('t');
+        } else if (code < 0x20 || code == 0x7F) {
+            out += backslash;
+            out += QLatin1String("u{");
+            out += QString::number(code, 16);
+            out += QLatin1Char('}');
+        } else {
+            out += ch;
+        }
+    }
+    return out + quotation;
+}
+
+/// Rust 的 `{}` 走最短可往返位数（`0.1` 就是 0.1，不是 0.10000000000000001），
+/// 且从不用科学计数法；serde 的 WithDecimalPoint 再给整数值补上 `.0`。
+QString rustFloatDisplay(double value)
+{
+    QString text;
+    for (int precision = 0; precision <= 17; ++precision) {
+        text = QString::number(value, 'f', precision);
+        bool roundTrips = false;
+        const double back = text.toDouble(&roundTrips);
+        if (roundTrips && back == value) {
+            break;
+        }
+    }
+    if (!text.contains(QLatin1Char('.'))) {
+        text += QStringLiteral(".0");
+    }
+    return text;
+}
+
+/// serde `Unexpected` 的 Display（本机 serde_core-1.0.229 `src/de/mod.rs:402` 起）：
+/// 标量带值（`string "nope"` / boolean `true` / integer `5` / floating point `1.5`），
+/// 容器与 null 是裸词（sequence / map / null）。
 QString serdeTypeName(const Json &value)
 {
     if (value.is_null()) {
         return QStringLiteral("null");
     }
     if (value.is_boolean()) {
-        return QStringLiteral("boolean");
+        return QStringLiteral("boolean `%1`").arg(value.get<bool>() ? QStringLiteral("true")
+                                                                   : QStringLiteral("false"));
     }
     if (value.is_string()) {
-        return QStringLiteral("string");
+        return QStringLiteral("string ")
+            + rustDebugQuoted(QString::fromStdString(value.get<std::string>()));
     }
     if (value.is_number_integer() || value.is_number_unsigned()) {
-        return QStringLiteral("integer");
+        return QStringLiteral("integer `%1`").arg(QString::number(value.get<long long>()));
     }
     if (value.is_number_float()) {
-        return QStringLiteral("floating point number");
+        return QStringLiteral("floating point `%1`").arg(rustFloatDisplay(value.get<double>()));
     }
     if (value.is_array()) {
         return QStringLiteral("sequence");
@@ -150,57 +211,271 @@ QString serdeTypeName(const Json &value)
     return QStringLiteral("value");
 }
 
-/// 提取并解析 JSON body，把 axum 的 415 / 400 / 422 三种拒绝原样搬过来。
+/// 一个 JSON 值在**原始字节流**里的形状与位置。serde 的列号是字节位，而 nlohmann 不
+/// 保留原文位置，所以要在原始 body 上自己扫一遍。
+enum class RawShape { String, Integer, Float, Literal, Array, Object, Missing };
+
+struct RawValue {
+    RawShape shape = RawShape::Missing;
+    size_t start = 0;  ///< 1-based，首字节
+    size_t end = 0;    ///< 1-based，末字节
+};
+
+/// serde 报的列号是**字节**位（实测：两个汉字的字符串值报在 byte 25，不是 char 20）。
+/// 标量 = 该 token 最后一个字节；数组/对象 = 开括号**前一**个字节（serde_json 还没吃
+/// 掉 `[` 就报错，空格也算在内：`" : [1]` 报在冒号和括号之间那个空格上）。
+size_t serdeColumn(const RawValue &raw)
+{
+    switch (raw.shape) {
+    case RawShape::String:
+    case RawShape::Literal:
+    case RawShape::Integer:
+    case RawShape::Float:
+        return raw.end;
+    case RawShape::Array:
+    case RawShape::Object:
+        return raw.start > 0 ? raw.start - 1 : 0;
+    case RawShape::Missing:
+        break;
+    }
+    return 0;
+}
+
+/// 扫顶层对象的每个值 token；order 按文档顺序收键名（serde 取的是文档里的第一个错）。
+QHash<QString, RawValue> scanTopLevelValues(const QByteArray &body, QVector<QString> *order)
+{
+    QHash<QString, RawValue> found;
+    size_t index = 0;
+    const auto skipSpace = [&]() {
+        while (index < size_t(body.size())
+               && (body.at(index) == ' ' || body.at(index) == '\t' || body.at(index) == '\n'
+                   || body.at(index) == '\r')) {
+            ++index;
+        }
+    };
+    skipSpace();
+    if (index >= size_t(body.size()) || body.at(index) != '{') {
+        return found;
+    }
+    ++index;
+    while (true) {
+        skipSpace();
+        if (index >= size_t(body.size()) || body.at(index) == '}' || body.at(index) != '"') {
+            return found;
+        }
+        const size_t keyStart = ++index;
+        while (index < size_t(body.size()) && body.at(index) != '"') {
+            if (body.at(index) == '\\') {
+                ++index;
+            }
+            ++index;
+        }
+        const QString key = QString::fromUtf8(body.mid(int(keyStart), int(index - keyStart)));
+        ++index;
+        skipSpace();
+        if (index < size_t(body.size()) && body.at(index) == ':') {
+            ++index;
+        }
+        skipSpace();
+        if (index >= size_t(body.size())) {
+            return found;
+        }
+        RawValue value;
+        const char head = body.at(index);
+        if (head == '"') {
+            value.shape = RawShape::String;
+            value.start = index + 1;
+            ++index;
+            while (index < size_t(body.size()) && body.at(index) != '"') {
+                if (body.at(index) == '\\') {
+                    ++index;
+                }
+                ++index;
+            }
+            value.end = index + 1;
+            ++index;
+        } else if (head == '[' || head == '{') {
+            value.shape = head == '[' ? RawShape::Array : RawShape::Object;
+            value.start = index + 1;
+            value.end = index + 1;
+            int depth = 0;
+            bool inString = false;
+            for (; index < size_t(body.size()); ++index) {
+                const char ch = body.at(index);
+                if (inString) {
+                    if (ch == '\\') {
+                        ++index;
+                    } else if (ch == '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+                if (ch == '"') {
+                    inString = true;
+                } else if (ch == '[' || ch == '{') {
+                    ++depth;
+                } else if (ch == ']' || ch == '}') {
+                    --depth;
+                    if (depth == 0) {
+                        ++index;
+                        break;
+                    }
+                }
+            }
+        } else if (head == 't' || head == 'f' || head == 'n') {
+            value.shape = RawShape::Literal;
+            value.start = index + 1;
+            index += head == 'f' ? 5 : 4;
+            value.end = index;
+        } else if (head == '-' || head == '+' || head == '.' || (head >= '0' && head <= '9')) {
+            value.start = index + 1;
+            while (index < size_t(body.size())) {
+                const char ch = body.at(index);
+                const bool numeric = (ch >= '0' && ch <= '9') || ch == '-' || ch == '+'
+                    || ch == '.' || ch == 'e' || ch == 'E';
+                if (!numeric) {
+                    break;
+                }
+                ++index;
+            }
+            value.end = index;
+            const QByteArray token = body.mid(int(value.start - 1), int(value.end - value.start + 1));
+            value.shape = (token.contains('.') || token.contains('e') || token.contains('E'))
+                ? RawShape::Float
+                : RawShape::Integer;
+        } else {
+            return found;
+        }
+        // 重复键：serde 取后出现的值，所以覆盖；顺序表里只留第一次出现的位置。
+        if (!found.contains(key) && order != nullptr) {
+            order->push_back(key);
+        }
+        found.insert(key, value);
+        skipSpace();
+        if (index < size_t(body.size()) && body.at(index) == ',') {
+            ++index;
+            continue;
+        }
+        return found;
+    }
+}
+
+/// 提取并解析 JSON body，把 axum 的 415 / 422 拒绝原样搬过来。
 struct JsonBody {
     Json value = Json::object();
+    QByteArray raw;
+    QHash<QString, RawValue> tokens;
+    QVector<QString> keyOrder;
     std::optional<Response> rejection;
 
     bool ok() const { return !rejection.has_value(); }
+
+    /// 该键值的 serde 列号；扫不到就回 0（调用方于是省略 " at line 1 column N" 后缀）。
+    size_t column(const QString &key) const
+    {
+        const auto found = tokens.constFind(key);
+        return found == tokens.constEnd() ? 0 : serdeColumn(*found);
+    }
+
+    /// 该键值 token 的列号（键名是 C 串，调用点多数写的是字面量）。
+    size_t column(const char *key) const { return column(QString::fromLatin1(key)); }
+
+    /// struct 反序列化结束时 serde_json 已经吃掉整段 body，所以缺字段的错报在
+    /// 最后一字节（实测 `{}` 报 column 2、`{"zzz":1}` 报 column 9）。
+    size_t endColumn() const { return size_t(raw.size()); }
+
+    /// 值 token 的首字节位：枚举值不是字符串时 serde_json 是在 peek 阶段失败的，
+    /// 报的是开括号/首字符本身；对象要先吃掉 `{` 才发现里面没有变体名，故 +1。
+    size_t startColumn(const QString &key) const
+    {
+        const auto found = tokens.constFind(key);
+        if (found == tokens.constEnd()) {
+            return 0;
+        }
+        return found->shape == RawShape::Object ? found->start + 1 : found->start;
+    }
+
+    size_t startColumn(const char *key) const { return startColumn(QString::fromLatin1(key)); }
 };
 
 JsonBody extractJsonBody(const Request &request, const QString &structName)
 {
     const QString contentType = request.header(QStringLiteral("content-type"));
     if (!Http::isJsonContentType(contentType)) {
-        return {Json(), Http::rejection(415, kExpectedJsonContentType)};
+        return {Json(), QByteArray(), {}, {}, Http::rejection(415, kExpectedJsonContentType)};
     }
     if (request.body.isEmpty()) {
         // axum: serde_json 在空输入上报 Category::Eof → JsonSyntaxError → 422。
-        return {Json(), Http::rejection(422, kJsonParseFailure + emptyBodyDetail())};
+        return {Json(), QByteArray(), {}, {},
+                Http::rejection(400, kJsonParseFailure + emptyBodyDetail())};
     }
     const Result<Json> parsed = JsonUtil::parse(QString::fromUtf8(request.body));
     if (parsed.isErr()) {
         // detail 来自 nlohmann 的异常文本，措辞与 serde_json 不同（状态码一致）。
-        return {Json(), Http::rejection(422, kJsonParseFailure + parsed.error())};
+        return {Json(), request.body, {}, {},
+                Http::rejection(400, kJsonParseFailure + parsed.error())};
     }
     if (!parsed.value().is_object()) {
-        return {Json(),
+        return {Json(), request.body, {}, {},
                 Http::rejection(422, kJsonTypeFailure + QStringLiteral("invalid type: %1, expected struct %2")
                                              .arg(serdeTypeName(parsed.value()), structName))};
     }
-    return {parsed.value(), std::nullopt};
+    JsonBody extracted{parsed.value(), request.body, {}, {}, std::nullopt};
+    extracted.tokens = scanTopLevelValues(request.body, &extracted.keyOrder);
+    return extracted;
 }
 
-Response invalidTypeRejection(const Json &value, const QString &expected)
+/// serde 的错按 axum 的样子拼：前缀 + `invalid type/value: …, expected …`
+/// + 可选的 ` at line 1 column N`。
+Response serdeStyleRejection(const QString &detail, size_t column)
 {
-    return Http::rejection(422,
-                           kJsonTypeFailure
-                               + QStringLiteral("invalid type: %1, expected %2")
-                                     .arg(serdeTypeName(value), expected));
+    QString body = kJsonTypeFailure + detail;
+    if (column > 0) {
+        body += QStringLiteral(" at line 1 column %1").arg(column);
+    }
+    return Http::rejection(422, body);
+}
+
+/// 负数/越界打到一个更窄的整数类型上时，serde 说的是 invalid **value** 而不是 type。
+Response invalidValueRejection(const Json &value, const QString &expected, size_t column = 0)
+{
+    return serdeStyleRejection(
+        QStringLiteral("invalid value: %1, expected %2").arg(serdeTypeName(value), expected),
+        column);
+}
+
+Response invalidTypeRejection(const Json &value, const QString &expected, size_t column = 0)
+{
+    return serdeStyleRejection(
+        QStringLiteral("invalid type: %1, expected %2").arg(serdeTypeName(value), expected),
+        column);
+}
+
+/// serde_derive 在 map 走到末尾才发现键不在，所以列号 = 已消费的字节数（= body 长度）。
+Response missingFieldRejection(const char *key, size_t column)
+{
+    return serdeStyleRejection(
+        QStringLiteral("missing field `%1`").arg(QString::fromLatin1(key)), column);
+}
+
+/// 枚举值不是字符串时 serde_json 在 peek 阶段就失败，属 Syntax 一类 → axum 给 400，
+/// 文案是 "expected value"，而不是 invalid type（实测）。
+Response expectedValueRejection(size_t column)
+{
+    return Http::rejection(
+        400, kJsonParseFailure + QStringLiteral("expected value at line 1 column %1").arg(column));
 }
 
 /// 必填字符串字段：缺键 → `missing field`，类型不对 → invalid type。
-bool requireString(const Json &body, const char *key, QString &out, Response &rejection)
+bool requireString(const JsonBody &body, const char *key, QString &out, Response &rejection)
 {
-    const auto found = body.find(key);
-    if (found == body.end() || found->is_null()) {
-        rejection = Http::rejection(
-            422, kJsonTypeFailure + QStringLiteral("missing field `%1`")
-                                         .arg(QString::fromLatin1(key)));
+    const auto found = body.value.find(key);
+    if (found == body.value.end() || found->is_null()) {
+        rejection = missingFieldRejection(key, body.endColumn());
         return false;
     }
     if (!found->is_string()) {
-        rejection = invalidTypeRejection(*found, QStringLiteral("a string"));
+        rejection = invalidTypeRejection(*found, QStringLiteral("a string"), body.column(key));
         return false;
     }
     out = QString::fromStdString(found->get<std::string>());
@@ -230,54 +505,6 @@ QString unknownVariantDetail(const QString &value, const QStringList &variants)
     }
     return QStringLiteral("unknown variant `%1`, expected one of %2")
         .arg(value, quoted.join(QStringLiteral(", ")));
-}
-
-bool kernelKindFromJson(const Json &body, const char *key, Kernel::Kind &out, Response &rejection,
-                        bool optional)
-{
-    const auto found = body.find(key);
-    if (found == body.end() || found->is_null()) {
-        if (optional) {
-            return true;
-        }
-        rejection = Http::rejection(
-            422, kJsonTypeFailure + QStringLiteral("missing field `%1`")
-                                         .arg(QString::fromLatin1(key)));
-        return false;
-    }
-    if (!found->is_string()) {
-        rejection = invalidTypeRejection(*found, QStringLiteral("a string"));
-        return false;
-    }
-    const QString text = QString::fromStdString(found->get<std::string>());
-    if (!kernelKindVariants().contains(text)) {
-        rejection = Http::rejection(422, kJsonTypeFailure
-                                                 + unknownVariantDetail(text, kernelKindVariants()));
-        return false;
-    }
-    out = Kernel::kindFromText(text);
-    return true;
-}
-
-bool kernelPreferenceFromJson(const Json &body, const char *key,
-                              std::optional<Kernel::Preference> &out, Response &rejection)
-{
-    const auto found = body.find(key);
-    if (found == body.end() || found->is_null()) {
-        return true;
-    }
-    if (!found->is_string()) {
-        rejection = invalidTypeRejection(*found, QStringLiteral("a string"));
-        return false;
-    }
-    const QString text = QString::fromStdString(found->get<std::string>());
-    if (!kernelPreferenceVariants().contains(text)) {
-        rejection =
-            Http::rejection(422, kJsonTypeFailure + unknownVariantDetail(text, kernelPreferenceVariants()));
-        return false;
-    }
-    out = Kernel::preferenceFromText(text);
-    return true;
 }
 
 /// 查询串里的可选整数（usize / u32）。
@@ -393,33 +620,37 @@ QVector<QString> jsonToStringVector(const Json &value)
 /// 而 Models::UpdateSettings::fromJson 是宽松读法，所以这里先做一遍严格校验。
 enum class ValueKind {
     Bool,
-    Integer,
+    U32,
+    Usize,
     Text,
 };
+
+/// 键名 → 期望类型的一张小程序内 schema，供 checkTypedKeys 用。
+using FieldSchema = QHash<QString, ValueKind>;
 
 const QHash<QString, ValueKind> &updateSettingsSchema()
 {
     static const QHash<QString, ValueKind> schema = {
         {QStringLiteral("auto_fetch_enabled"), ValueKind::Bool},
-        {QStringLiteral("auto_fetch_interval_min"), ValueKind::Integer},
+        {QStringLiteral("auto_fetch_interval_min"), ValueKind::U32},
         {QStringLiteral("auto_speedtest_enabled"), ValueKind::Bool},
-        {QStringLiteral("fetch_concurrency"), ValueKind::Integer},
-        {QStringLiteral("fetch_timeout_secs"), ValueKind::Integer},
-        {QStringLiteral("speedtest_concurrency"), ValueKind::Integer},
-        {QStringLiteral("speedtest_timeout_ms"), ValueKind::Integer},
+        {QStringLiteral("fetch_concurrency"), ValueKind::U32},
+        {QStringLiteral("fetch_timeout_secs"), ValueKind::U32},
+        {QStringLiteral("speedtest_concurrency"), ValueKind::U32},
+        {QStringLiteral("speedtest_timeout_ms"), ValueKind::U32},
         {QStringLiteral("speedtest_download"), ValueKind::Bool},
-        {QStringLiteral("download_test_ms"), ValueKind::Integer},
+        {QStringLiteral("download_test_ms"), ValueKind::U32},
         {QStringLiteral("http_server_enabled"), ValueKind::Bool},
         {QStringLiteral("close_to_tray"), ValueKind::Bool},
         {QStringLiteral("exclude_keywords"), ValueKind::Text},
-        {QStringLiteral("failover_latency_ms"), ValueKind::Integer},
+        {QStringLiteral("failover_latency_ms"), ValueKind::U32},
         {QStringLiteral("speedtest_parallel_kernels"), ValueKind::Bool},
         {QStringLiteral("speedtest_persistent_kernel"), ValueKind::Bool},
-        {QStringLiteral("speedtest_reuse_minutes"), ValueKind::Integer},
+        {QStringLiteral("speedtest_reuse_minutes"), ValueKind::U32},
         {QStringLiteral("speedtest_conditional_isolation"), ValueKind::Bool},
-        {QStringLiteral("speedtest_download_top_n"), ValueKind::Integer},
+        {QStringLiteral("speedtest_download_top_n"), ValueKind::U32},
         {QStringLiteral("bandwidth_guard"), ValueKind::Bool},
-        {QStringLiteral("bandwidth_min_kbps"), ValueKind::Integer},
+        {QStringLiteral("bandwidth_min_kbps"), ValueKind::U32},
         {QStringLiteral("publisher_api"), ValueKind::Text},
         {QStringLiteral("publisher_token"), ValueKind::Text},
         {QStringLiteral("ui_theme"), ValueKind::Text},
@@ -433,71 +664,87 @@ const QHash<QString, ValueKind> &updateSettingsSchema()
     return schema;
 }
 
-bool typeMatches(const Json &value, ValueKind kind)
+/// "类型对不对"与"这个值进不进得了该类型"是两件事：负数打到 u32 上，
+/// serde 报 invalid **value**，措辞与 invalid type 不同（实测）。
+enum class FieldCheck { Ok, WrongType, OutOfRange };
+
+FieldCheck checkField(const Json &value, ValueKind kind)
 {
-    switch (kind) {
-    case ValueKind::Bool:
-        return value.is_boolean();
-    case ValueKind::Integer:
-        return value.is_number_integer() || value.is_number_unsigned();
-    case ValueKind::Text:
-        return value.is_string();
+    if (kind == ValueKind::Bool) {
+        return value.is_boolean() ? FieldCheck::Ok : FieldCheck::WrongType;
     }
-    return true;
+    if (kind == ValueKind::Text) {
+        return value.is_string() ? FieldCheck::Ok : FieldCheck::WrongType;
+    }
+    if (!value.is_number_integer() && !value.is_number_unsigned()) {
+        return FieldCheck::WrongType;
+    }
+    const long long number = value.get<long long>();
+    if (number < 0) {
+        return FieldCheck::OutOfRange;
+    }
+    // usize 在本机是 64 位，正数基本进得去；u32 还有一道上界。
+    if (kind == ValueKind::U32 && number > 4294967295LL) {
+        return FieldCheck::OutOfRange;
+    }
+    return FieldCheck::Ok;
 }
 
+/// serde 对每种类型的叫法不统一（bool 是 "a boolean"，String 是 "a string"，
+/// u32 就光秃秃一个 "u32"）—— 措辞全部按实测输出对齐。
 QString expectedName(ValueKind kind)
 {
     switch (kind) {
     case ValueKind::Bool:
         return QStringLiteral("a boolean");
-    case ValueKind::Integer:
-        return QStringLiteral("an integer");
+    case ValueKind::U32:
+        return QStringLiteral("u32");
+    case ValueKind::Usize:
+        return QStringLiteral("usize");
     case ValueKind::Text:
         return QStringLiteral("a string");
     }
     return QString();
 }
 
-bool checkStringKeys(const Json &body, const QStringList &keys, Response &rejection)
+/// 按 schema 逐字段核类型，返回 serde 会产生的第一条拒绝（没问题就是 nullopt）。
+/// 必须走**文档顺序**：`{"a":bad,"b":bad}` serde 报的是 a，而不是 schema 里先写的 b。
+/// `enums` 里的键按 serde enum 处理：值不是字符串就落在 peek 阶段（Syntax → 400
+/// "expected value"），是字符串但不是变体名才是 422 的 unknown variant（实测）。
+std::optional<Response> checkTypedKeys(const JsonBody &body, const FieldSchema &schema,
+                                       const QHash<QString, QStringList> &enums = {})
 {
-    for (const QString &key : keys) {
-        const auto found = body.find(key.toStdString());
-        if (found == body.end() || found->is_null() || found->is_string()) {
+    for (const QString &key : body.keyOrder) {
+        const auto entry = body.value.find(key.toStdString());
+        if (entry == body.value.end() || entry->is_null()) {
+            continue; // null 是 Option 的合法值
+        }
+        const auto variants = enums.constFind(key);
+        if (variants != enums.constEnd()) {
+            if (!entry->is_string()) {
+                return expectedValueRejection(body.startColumn(key));
+            }
+            const QString text = QString::fromStdString(entry->get<std::string>());
+            if (!variants->contains(text)) {
+                return serdeStyleRejection(unknownVariantDetail(text, *variants), body.column(key));
+            }
             continue;
         }
-        rejection = invalidTypeRejection(*found, QStringLiteral("a string"));
-        return false;
-    }
-    return true;
-}
-
-bool checkBoolKeys(const Json &body, const QStringList &keys, Response &rejection)
-{
-    for (const QString &key : keys) {
-        const auto found = body.find(key.toStdString());
-        if (found == body.end() || found->is_null() || found->is_boolean()) {
+        const auto wanted = schema.constFind(key);
+        if (wanted == schema.constEnd()) {
+            continue; // 未知字段 serde 忽略
+        }
+        const FieldCheck checked = checkField(*entry, *wanted);
+        if (checked == FieldCheck::Ok) {
             continue;
         }
-        rejection = invalidTypeRejection(*found, QStringLiteral("a boolean"));
-        return false;
-    }
-    return true;
-}
-
-bool checkUnsignedKeys(const Json &body, const QStringList &keys, Response &rejection)
-{
-    for (const QString &key : keys) {
-        const auto found = body.find(key.toStdString());
-        if (found == body.end() || found->is_null()) {
-            continue;
+        const QString expected = expectedName(*wanted);
+        if (checked == FieldCheck::OutOfRange) {
+            return invalidValueRejection(*entry, expected, body.column(key));
         }
-        if (!found->is_number_integer() && !found->is_number_unsigned()) {
-            rejection = invalidTypeRejection(*found, QStringLiteral("usize"));
-            return false;
-        }
+        return invalidTypeRejection(*entry, expected, body.column(key));
     }
-    return true;
+    return std::nullopt;
 }
 
 /// `{"deleted": n}` 家族（clear / delete-dead / delete-invalid / dedupe）。
@@ -518,14 +765,22 @@ Response connectProxyNode(const Handlers &handlers, const AppState &state, const
     if (!body.ok()) {
         return *body.rejection;
     }
+    // 两个字段要在同一趟文档顺序遍历里比：Rust 那边 node_id 的类型错和 kernel 的
+    // 枚举错谁在前面取决于 body 里谁先出现。
+    if (const std::optional<Response> wrongType = checkTypedKeys(
+            body, {{QStringLiteral("node_id"), ValueKind::Text}},
+            {{QStringLiteral("kernel"), kernelPreferenceVariants()}})) {
+        return *wrongType;
+    }
     QString nodeId;
     Response rejection;
-    if (!requireString(body.value, "node_id", nodeId, rejection)) {
+    if (!requireString(body, "node_id", nodeId, rejection)) {
         return rejection;
     }
     std::optional<Kernel::Preference> kernel;
-    if (!kernelPreferenceFromJson(body.value, "kernel", kernel, rejection)) {
-        return rejection;
+    const std::optional<QString> kernelText = JsonUtil::optTextValue(body.value, "kernel");
+    if (kernelText.has_value()) {
+        kernel = Kernel::preferenceFromText(*kernelText);
     }
     if (!state.db || !state.proxy) {
         return Handlers::errorResponse(QStringLiteral("proxy layer is not wired"));
@@ -662,11 +917,16 @@ Response Handlers::updateKernel(const Request &request, const PathParams &) cons
     if (!body.ok()) {
         return *body.rejection;
     }
-    Kernel::Kind kind = Kernel::Kind::Mihomo;
+    if (const std::optional<Response> wrongType
+        = checkTypedKeys(body, {}, {{QStringLiteral("kind"), kernelKindVariants()}})) {
+        return *wrongType;
+    }
+    QString kindText;
     Response rejection;
-    if (!kernelKindFromJson(body.value, "kind", kind, rejection, false)) {
+    if (!requireString(body, "kind", kindText, rejection)) {
         return rejection;
     }
+    const Kernel::Kind kind = Kernel::kindFromText(kindText);
     if (!state_.kernel) {
         return errorResponse(QStringLiteral("kernel layer is not wired"));
     }
@@ -863,17 +1123,8 @@ Response Handlers::updateSettings(const Request &request, const PathParams &) co
     if (!body.ok()) {
         return *body.rejection;
     }
-    for (const auto &entry : body.value.items()) {
-        const auto found = updateSettingsSchema().find(QString::fromLatin1(entry.key().c_str()));
-        if (found == updateSettingsSchema().end() || entry.value().is_null()) {
-            continue; // 未知字段 serde 忽略；null 是 Option 的合法值
-        }
-        if (!typeMatches(entry.value(), *found)) {
-            return Http::rejection(422, kJsonTypeFailure
-                                                + QStringLiteral("invalid type: %1, expected %2")
-                                                      .arg(serdeTypeName(entry.value()),
-                                                           expectedName(*found)));
-        }
+    if (const std::optional<Response> rejection = checkTypedKeys(body, updateSettingsSchema())) {
+        return *rejection;
     }
     if (!state_.db) {
         return errorResponse(QStringLiteral("database is not wired"));
@@ -928,17 +1179,19 @@ Response Handlers::createSource(const Request &request, const PathParams &) cons
         return *body.rejection;
     }
     Response rejection;
-    if (!checkStringKeys(body.value, {QStringLiteral("name"), QStringLiteral("url_template")},
-                         rejection)
-        || !checkBoolKeys(body.value, {QStringLiteral("enabled")}, rejection)) {
-        return rejection;
+    if (const std::optional<Response> wrongType = checkTypedKeys(
+            body, {{QStringLiteral("name"), ValueKind::Text},
+                   {QStringLiteral("url_template"), ValueKind::Text},
+                   {QStringLiteral("remark"), ValueKind::Text},
+                   {QStringLiteral("enabled"), ValueKind::Bool}})) {
+        return *wrongType;
     }
     QString name;
     QString urlTemplate;
-    if (!requireString(body.value, "name", name, rejection)) {
+    if (!requireString(body, "name", name, rejection)) {
         return rejection;
     }
-    if (!requireString(body.value, "url_template", urlTemplate, rejection)) {
+    if (!requireString(body, "url_template", urlTemplate, rejection)) {
         return rejection;
     }
     if (!state_.db) {
@@ -961,14 +1214,13 @@ Response Handlers::updateSource(const Request &request, const PathParams &params
     if (!body.ok()) {
         return *body.rejection;
     }
-    Response rejection;
-    if (!checkStringKeys(body.value,
-                         {QStringLiteral("name"), QStringLiteral("url_template"),
-                          QStringLiteral("remark")},
-                         rejection)
-        || !checkBoolKeys(body.value, {QStringLiteral("enabled"), QStringLiteral("push_disabled")},
-                          rejection)) {
-        return rejection;
+    if (const std::optional<Response> wrongType = checkTypedKeys(
+            body, {{QStringLiteral("name"), ValueKind::Text},
+                   {QStringLiteral("url_template"), ValueKind::Text},
+                   {QStringLiteral("remark"), ValueKind::Text},
+                   {QStringLiteral("enabled"), ValueKind::Bool},
+                   {QStringLiteral("push_disabled"), ValueKind::Bool}})) {
+        return *wrongType;
     }
     if (!state_.db) {
         return errorResponse(QStringLiteral("database is not wired"));
@@ -1034,10 +1286,10 @@ Response Handlers::discoverGists(const Request &request, const PathParams &) con
     if (!body.ok()) {
         return *body.rejection;
     }
-    Response rejection;
-    if (!checkStringKeys(body.value, {QStringLiteral("query")}, rejection)
-        || !checkUnsignedKeys(body.value, {QStringLiteral("max_pages")}, rejection)) {
-        return rejection;
+    if (const std::optional<Response> wrongType = checkTypedKeys(
+            body, {{QStringLiteral("query"), ValueKind::Text},
+                   {QStringLiteral("max_pages"), ValueKind::Usize}})) {
+        return *wrongType;
     }
     if (!state_.collector) {
         return errorResponse(QStringLiteral("collector layer is not wired"));
