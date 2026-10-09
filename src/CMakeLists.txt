@@ -236,6 +236,7 @@ target_link_libraries(vcc PRIVATE
 )
 
 set_target_properties(vcc PROPERTIES WIN32_EXECUTABLE TRUE)
+include(${CMAKE_SOURCE_DIR}/cmake/DeployRuntime.cmake OPTIONAL)
 
 add_library(vccExport STATIC
     export/ClashProxy.cpp
