@@ -75,6 +75,29 @@ const entries = [
   ['navSystemSettings', 'gui/views/sidebar.rs', 'Tab::Settings, Icon::', 0, 'nonAscii', 'uitext'],
   ['navExternalApi', 'gui/views/sidebar.rs', 'Tab::Api, Icon::', 0, 'nonAscii', 'uitext'],
 
+  // ---- gui/views/proxy.rs：控制台六个分栏。锚点取 label 自己那行附近，
+  // 因为"活跃连接"是 conn_label 算出来的，不在 ProxyPanel:: 那一行上。 ----
+  ['panelNodes', 'gui/views/proxy.rs', 'ProxyPanel::Nodes,', 0, 'nonAscii', 'uitext'],
+  ['panelConnections', 'gui/views/proxy.rs', 'let conn_label = if self.active_connections.is_empty()', 0, 'nonAscii', 'uitext'],
+  ['panelConnectionsCounted', 'gui/views/proxy.rs', 'self.active_connections.len())', 0, 'nonAscii', 'uitext'],
+  ['panelRules', 'gui/views/proxy.rs', 'ProxyPanel::Rules,', 0, 'nonAscii', 'uitext'],
+  ['panelNetwork', 'gui/views/proxy.rs', 'ProxyPanel::Network,', 0, 'any', 'uitext'],
+  ['panelKernels', 'gui/views/proxy.rs', 'ProxyPanel::Kernels,', 0, 'nonAscii', 'uitext'],
+  ['panelLogs', 'gui/views/proxy.rs', 'ProxyPanel::Logs,', 0, 'nonAscii', 'uitext'],
+
+  // ---- gui/widgets.rs::proxy_state_label：状态徽章的文字（颜色在代码里按角色映射）。 ----
+  ['stateStopped', 'gui/widgets.rs', 'ProxyState::Stopped => (', 0, 'nonAscii', 'uitext'],
+  ['stateStarting', 'gui/widgets.rs', 'ProxyState::Starting => (', 0, 'nonAscii', 'uitext'],
+  ['stateRunning', 'gui/widgets.rs', 'ProxyState::Running => (', 0, 'nonAscii', 'uitext'],
+  ['stateDegraded', 'gui/widgets.rs', 'ProxyState::Degraded => (', 0, 'nonAscii', 'uitext'],
+  ['stateStopping', 'gui/widgets.rs', 'ProxyState::Stopping => (', 0, 'nonAscii', 'uitext'],
+  ['stateFailed', 'gui/widgets.rs', 'ProxyState::Failed => (', 0, 'nonAscii', 'uitext'],
+
+  // ---- gui/views/proxy.rs：「预备」徽章的三种说法。 ----
+  ['preparedFailed', 'gui/views/proxy.rs', '} else if self.prepare_error.is_some() {', 0, 'nonAscii', 'uitext'],
+  ['preparedDownloading', 'gui/views/proxy.rs', 'crate::gui::prepare::MAX_AUTO_ATTEMPTS', 0, 'nonAscii', 'uitext'],
+  ['prepared', 'gui/views/proxy.rs', '(text, theme::accent())', 0, 'nonAscii', 'uitext'],
+
 ];
 
 // 纯 ASCII 的常量（比如 NO_PROXY 列表）直接生成字符串字面量，可读性优先；

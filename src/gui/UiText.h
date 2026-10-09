@@ -11,5 +11,21 @@ QString navNodePool();
 QString navSubscriptions();
 QString navSystemSettings();
 QString navExternalApi();
+QString panelNodes();
+QString panelConnections();
+QString panelConnectionsCounted();
+QString panelRules();
+QString panelNetwork();
+QString panelKernels();
+QString panelLogs();
+QString stateStopped();
+QString stateStarting();
+QString stateRunning();
+QString stateDegraded();
+QString stateStopping();
+QString stateFailed();
+QString preparedFailed();
+QString preparedDownloading();
+QString prepared();
 
 }

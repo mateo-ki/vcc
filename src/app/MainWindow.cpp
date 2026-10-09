@@ -9,6 +9,7 @@
 #include <QWidget>
 
 #include "app/AppContext.h"
+#include "gui/Pages.h"
 #include "gui/Theme.h"
 #include "gui/UiText.h"
 #include "proxy/ProxyManager.h"
@@ -48,7 +49,8 @@ MainWindow::MainWindow(App::AppContext &context, QWidget *parent)
     rightBox->setSpacing(0);
 
     pages_ = new QStackedWidget(right);
-    for (int index = 0; index < kTabCount; ++index) {
+    pages_->addWidget(createProxyPage(context_, pages_));
+    for (int index = 1; index < kTabCount; ++index) {
         pages_->addWidget(new QWidget(pages_));
     }
     rightBox->addWidget(pages_, 1);
