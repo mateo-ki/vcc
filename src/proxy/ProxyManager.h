@@ -23,6 +23,14 @@ inline constexpr int kStartupSystemProxyReserveMs = 250;
 inline constexpr int kStartupPortConnectTimeoutMs = 60;
 inline constexpr bool kVerifyConnectivityOnStart = true;
 
+/// 经本地 mixed 端口真取一次 generate_204：只有 204 才算通。Rust 侧是私有的
+/// `verify_local_proxy`；这里公开是因为 C++ 没有 cfg(test)，而 API/GUI 也要单探一次。
+Status verifyLocalProxy(quint16 port, int timeoutMs);
+
+/// 启动前确认一个端口空闲。第二次重试会**清残留代理内核进程**，
+/// 所以只许在启动路径上调用，别拿它当普通探测用。
+Status ensurePortAvailable(quint16 port);
+
 /// 各内核的批次上限：mihomo 一批 256，sing-box/xray 一批 64。
 int kernelBatchSize(Kernel::Kind kind);
 /// 就绪判定用的端口（mihomo 看控制器端口，其它看 mixed 端口）。
@@ -81,6 +89,13 @@ private:
 
     void markFailed(Runtime &runtime, const QString &message);
     void setFailed(const QString &message);
+  public:
+    /// 指定内核与可执行文件路径启动。对应 Rust 的 `start_with_kernel_path`：
+    /// 提权交接与测试都要这条路，Rust 用 pub(crate)，C++ 只能公开。
+    Status startWithKernelPath(const Models::Node &node, Kernel::Kind kernel,
+                               const QString &executablePath);
+
+  private:
     Status startWithPreference(const Models::Node &node,
                                std::optional<SysProxy::Snapshot> preservedSnapshot,
                                std::optional<Kernel::Preference> kernelOverride);

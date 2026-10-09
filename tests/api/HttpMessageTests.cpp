@@ -30,7 +30,7 @@ TEST(HttpMessage, ParsesRequestLineHeadersAndBody)
     EXPECT_EQ(request.version.toStdString(), "HTTP/1.1");
     EXPECT_EQ(request.path.toStdString(), "/api/proxy/start");
     EXPECT_TRUE(request.rawQuery.isEmpty());
-    EXPECT_EQ(request.body.constData(), QByteArray("{\"a\":1}").constData());
+    EXPECT_EQ(request.body, QByteArray("{\"a\":1}"));
     // 只吃掉这一个请求，剩下的留给下一个（keep-alive）。
     EXPECT_EQ(consumed, raw.size() - 2);
     // header 名一律小写存下来，axum 的 headers.get(AUTHORIZATION) 才拿得到。
@@ -125,7 +125,8 @@ TEST(HttpMessage, RawQueryValueKeepsPercentAndTakesFirst)
     ASSERT_TRUE(parsed.isOk() && parsed.value().has_value());
     const Request &request = *parsed.value();
     EXPECT_EQ(request.rawQueryValue("token").value_or(QString()).toStdString(), "abc%20def");
-    EXPECT_EQ(request.query("token").value_or(QString()).toStdString(), "abc def");
+    // 重复键后出现的赢（serde 从 map 反序列化），所以这里拿到的是第二个 token。
+    EXPECT_EQ(request.query("token").value_or(QString()).toStdString(), "second");
 }
 
 TEST(HttpMessage, PathPercentDecodingKeepsPlusLiteral)

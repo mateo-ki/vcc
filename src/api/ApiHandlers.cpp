@@ -165,12 +165,13 @@ JsonBody extractJsonBody(const Request &request, const QString &structName)
         return {Json(), Http::rejection(415, kExpectedJsonContentType)};
     }
     if (request.body.isEmpty()) {
-        return {Json(), Http::rejection(400, kJsonParseFailure + emptyBodyDetail())};
+        // axum: serde_json 在空输入上报 Category::Eof → JsonSyntaxError → 422。
+        return {Json(), Http::rejection(422, kJsonParseFailure + emptyBodyDetail())};
     }
     const Result<Json> parsed = JsonUtil::parse(QString::fromUtf8(request.body));
     if (parsed.isErr()) {
         // detail 来自 nlohmann 的异常文本，措辞与 serde_json 不同（状态码一致）。
-        return {Json(), Http::rejection(400, kJsonParseFailure + parsed.error())};
+        return {Json(), Http::rejection(422, kJsonParseFailure + parsed.error())};
     }
     if (!parsed.value().is_object()) {
         return {Json(),

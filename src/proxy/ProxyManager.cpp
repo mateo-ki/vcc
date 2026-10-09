@@ -102,35 +102,6 @@ QString readKernelLog(const QString &path)
     return QString::fromUtf8(file.readAll());
 }
 
-/// 端口占用检查：4 次尝试，中间按 Rust 的节奏退避并在第二次清残留内核。
-Status ensurePortAvailable(quint16 port)
-{
-    QString lastError;
-    for (int attempt = 0; attempt < 4; ++attempt) {
-        QTcpServer server;
-        if (server.listen(QHostAddress::LocalHost, port)) {
-            server.close();
-            return Status::succeeded();
-        }
-        lastError = server.errorString();
-        if (attempt == 0) {
-            sleepMs(60);
-        } else if (attempt == 1) {
-            const int cleaned = Platform::killOrphanProxyCores();
-            if (cleaned > 0) {
-                Log::info(QStringLiteral("清理了 %1 个残留代理内核进程以释放端口 %2")
-                              .arg(cleaned)
-                              .arg(port));
-            }
-            sleepMs(120);
-        } else if (attempt == 2) {
-            sleepMs(100);
-        }
-    }
-    return Status::failed(
-        QStringLiteral("代理端口 %1 已被占用: %2").arg(port).arg(
-            lastError.isEmpty() ? QStringLiteral("未知错误") : lastError));
-}
 
 /// 等端口就绪；内核中途退出就算失败。
 bool waitForPort(QProcess *child, quint16 port, int timeoutMs)
@@ -153,48 +124,6 @@ bool waitForPort(QProcess *child, quint16 port, int timeoutMs)
     return false;
 }
 
-/// 经本地 mixed 端口真取一次 generate_204：必须是 204 才算通。
-Status verifyLocalProxy(quint16 port, int timeoutMs)
-{
-    QElapsedTimer clock;
-    clock.start();
-    QStringList lastErrors;
-    while (clock.elapsed() < timeoutMs) {
-        const qint64 remaining = timeoutMs - clock.elapsed();
-        if (remaining <= 0) {
-            break;
-        }
-        const int attemptTimeout = static_cast<int>(std::min<qint64>(remaining, 900));
-        Net::Request request;
-        request.url = ProxyProbe::kProxyConnectivityTestUrl;
-        request.method = QByteArrayLiteral("GET");
-        request.timeoutMs = attemptTimeout;
-        request.connectTimeoutMs = 600;
-        request.proxyUrl = QStringLiteral("http://127.0.0.1:%1").arg(port);
-        request.userAgent = QStringLiteral("vpn-parser/1.0");
-        const Result<Net::Response> response = Net::send(request);
-        if (response.isOk() && response.value().status == 204) {
-            return Status::succeeded();
-        }
-        if (response.isOk()) {
-            lastErrors = {QStringLiteral("%1 返回 HTTP %2，预期 204")
-                              .arg(request.url)
-                              .arg(response.value().status)};
-        } else {
-            lastErrors = {response.error()};
-        }
-        const qint64 left = timeoutMs - clock.elapsed();
-        if (left <= 0) {
-            break;
-        }
-        sleepMs(static_cast<int>(std::min<qint64>(left, 40)));
-    }
-    if (lastErrors.isEmpty()) {
-        lastErrors.append(QStringLiteral("验证超过 %1 ms").arg(timeoutMs));
-    }
-    return Status::failed(QStringLiteral("本地代理无法访问测试地址: %1")
-                              .arg(lastErrors.join(QStringLiteral("；"))));
-}
 
 }
 
@@ -486,6 +415,85 @@ Status ProxyManager::connect(const Models::Node &node,
         return restart(node, kernelOverride);
     }
     return startWithPreference(node, std::nullopt, kernelOverride);
+}
+
+/// 端口占用检查：4 次尝试，中间按 Rust 的节奏退避并在第二次清残留内核。
+Status ensurePortAvailable(quint16 port)
+{
+    QString lastError;
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        QTcpServer server;
+        if (server.listen(QHostAddress::LocalHost, port)) {
+            server.close();
+            return Status::succeeded();
+        }
+        lastError = server.errorString();
+        if (attempt == 0) {
+            sleepMs(60);
+        } else if (attempt == 1) {
+            const int cleaned = Platform::killOrphanProxyCores();
+            if (cleaned > 0) {
+                Log::info(QStringLiteral("清理了 %1 个残留代理内核进程以释放端口 %2")
+                              .arg(cleaned)
+                              .arg(port));
+            }
+            sleepMs(120);
+        } else if (attempt == 2) {
+            sleepMs(100);
+        }
+    }
+    return Status::failed(
+        QStringLiteral("代理端口 %1 已被占用: %2").arg(port).arg(
+            lastError.isEmpty() ? QStringLiteral("未知错误") : lastError));
+}
+
+/// 经本地 mixed 端口真取一次 generate_204：必须是 204 才算通。
+Status verifyLocalProxy(quint16 port, int timeoutMs)
+{
+    QElapsedTimer clock;
+    clock.start();
+    QStringList lastErrors;
+    while (clock.elapsed() < timeoutMs) {
+        const qint64 remaining = timeoutMs - clock.elapsed();
+        if (remaining <= 0) {
+            break;
+        }
+        const int attemptTimeout = static_cast<int>(std::min<qint64>(remaining, 900));
+        Net::Request request;
+        request.url = ProxyProbe::kProxyConnectivityTestUrl;
+        request.method = QByteArrayLiteral("GET");
+        request.timeoutMs = attemptTimeout;
+        request.connectTimeoutMs = 600;
+        request.proxyUrl = QStringLiteral("http://127.0.0.1:%1").arg(port);
+        request.userAgent = QStringLiteral("vpn-parser/1.0");
+        const Result<Net::Response> response = Net::send(request);
+        if (response.isOk() && response.value().status == 204) {
+            return Status::succeeded();
+        }
+        if (response.isOk()) {
+            lastErrors = {QStringLiteral("%1 返回 HTTP %2，预期 204")
+                              .arg(request.url)
+                              .arg(response.value().status)};
+        } else {
+            lastErrors = {response.error()};
+        }
+        const qint64 left = timeoutMs - clock.elapsed();
+        if (left <= 0) {
+            break;
+        }
+        sleepMs(static_cast<int>(std::min<qint64>(left, 40)));
+    }
+    if (lastErrors.isEmpty()) {
+        lastErrors.append(QStringLiteral("验证超过 %1 ms").arg(timeoutMs));
+    }
+    return Status::failed(QStringLiteral("本地代理无法访问测试地址: %1")
+                              .arg(lastErrors.join(QStringLiteral("；"))));
+}
+
+Status ProxyManager::startWithKernelPath(const Models::Node &node, Kernel::Kind kernel,
+                                        const QString &executablePath)
+{
+    return startWithPath(node, kernel, executablePath, std::nullopt);
 }
 
 Status ProxyManager::startWithPreference(const Models::Node &node,

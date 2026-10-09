@@ -112,6 +112,7 @@ target_link_libraries(vccProxy PUBLIC
     vccGeo
     vccExport
     vccSysProxy
+    vccPlatform
     vccNet
     yaml-cpp::yaml-cpp
 )

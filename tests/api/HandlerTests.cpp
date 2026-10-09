@@ -140,12 +140,14 @@ TEST_F(HandlerFixture, SettingsBodyMustBeJson)
                   QStringLiteral("text/plain"))
                   .status,
               415);
-    EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"), QByteArray()).status, 400);
-    EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"), QByteArray("[]")).status, 400);
+    // 三条都是"内容类型对、body 不成 JSON"：axum 0.8 一律 422（415 只给内容类型不对的）。
+    EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"), QByteArray()).status, 422);
+    EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"), QByteArray("[]")).status,
+              422);
     EXPECT_EQ(call(QStringLiteral("PUT"), QStringLiteral("/api/settings"),
                   QByteArray("{\"close_to_tray\": tru e}"))
                   .status,
-              400);
+              422);
 }
 
 // ---------------------------------------------------------------------------
@@ -477,8 +479,9 @@ TEST_F(HandlerFixture, ProxyLogClampsMaxChars)
 
 TEST_F(HandlerFixture, ProxyStartValidatesNodeAndKernel)
 {
+    // 测试助手默认带 application/json，所以空 body 走的是语法拒绝（422），不是 415。
     const Response noBody = call(QStringLiteral("POST"), QStringLiteral("/api/proxy/start"));
-    EXPECT_EQ(noBody.status, 415);
+    EXPECT_EQ(noBody.status, 422);
 
     const Response missingField = call(QStringLiteral("POST"), QStringLiteral("/api/proxy/start"),
                                       QByteArray("{}"));

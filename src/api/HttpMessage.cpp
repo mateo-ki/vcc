@@ -265,13 +265,14 @@ Result<std::optional<Request>> parseRequest(const QByteArray &buffer, int *consu
     if (request.headers.contains(QStringLiteral("transfer-encoding"))) {
         return Result<Parsed>::withError(QStringLiteral("chunked request bodies are not supported"));
     }
+    if (declared > kDefaultBodyLimitBytes) {
+        // 对应 axum 的 DefaultBodyLimit(2 MiB)：光看 Content-Length 就拒，
+        // 不是等收全了再说 —— 收全早就把内存吃光了。
+        return Result<Parsed>::withError(QStringLiteral("payload too large"));
+    }
     const qint64 available = buffer.size() - bodyStart;
     if (available < declared) {
         return Result<Parsed>::withValue(std::nullopt);
-    }
-    if (declared > kDefaultBodyLimitBytes) {
-        // 对应 axum 的 DefaultBodyLimit(2 MiB)：Bytes 提取失败 → FailedToBufferBody → 413。
-        return Result<Parsed>::withError(QStringLiteral("payload too large"));
     }
     request.body = buffer.mid(bodyStart, static_cast<int>(declared));
     if (consumed != nullptr) {
