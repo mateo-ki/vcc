@@ -312,8 +312,11 @@ void ProxyPage::refreshStatusCard()
     const StatusBadge badge = statusBadgeFor(status.state, hasKernel, isRunning);
     if (stateBadge_ != nullptr) {
         stateBadge_->setText(badge.text);
-        stateBadge_->setObjectName(badge.role);
-        Theme::apply(Theme::currentId());
+        if (stateBadge_->objectName() != badge.role) {
+            stateBadge_->setObjectName(badge.role);
+            stateBadge_->style()->unpolish(stateBadge_);
+            stateBadge_->style()->polish(stateBadge_);
+        }
     }
 
     if (stateMessage_ != nullptr) {
@@ -336,15 +339,21 @@ void ProxyPage::refreshStatusCard()
     }
 
     if (statusHealth_ != nullptr) {
+        QString targetRole;
         if (!status.lastError.isEmpty()) {
             statusHealth_->setText(QStringLiteral("⚠️ %1").arg(status.lastError));
-            statusHealth_->setObjectName(QStringLiteral("Danger"));
+            targetRole = QStringLiteral("Danger");
         } else if (isRunning) {
             statusHealth_->setText(QStringLiteral("✓ 代理运行中"));
-            statusHealth_->setObjectName(QStringLiteral("Success"));
+            targetRole = QStringLiteral("Success");
         } else {
             statusHealth_->setText(QStringLiteral("未运行"));
-            statusHealth_->setObjectName(QStringLiteral("Muted"));
+            targetRole = QStringLiteral("Muted");
+        }
+        if (statusHealth_->objectName() != targetRole) {
+            statusHealth_->setObjectName(targetRole);
+            statusHealth_->style()->unpolish(statusHealth_);
+            statusHealth_->style()->polish(statusHealth_);
         }
     }
 
@@ -570,7 +579,9 @@ void ProxyPage::reloadConnections()
     const auto status = context_.proxy().status();
     if (!status.localProxyActive()) {
         connections_.clear();
-        updateConnectionsTable();
+        if (currentPanel() == Panel::Connections) {
+            updateConnectionsTable();
+        }
         return;
     }
 
@@ -668,7 +679,9 @@ void ProxyPage::reloadConnections()
             downloadTotal_ = newDown;
             lastPollTimestamp_ = now;
 
-            updateConnectionsTable();
+            if (currentPanel() == Panel::Connections) {
+                updateConnectionsTable();
+            }
             refreshStatusCard();
         });
 }
@@ -714,24 +727,42 @@ void ProxyPage::updateConnectionsTable()
 
     if (connEmptyCard_ != nullptr) connEmptyCard_->setVisible(false);
     if (connTable_ != nullptr) {
+        connTable_->setUpdatesEnabled(false);
         connTable_->setVisible(true);
         connTable_->setRowCount(filtered.size());
         for (int row = 0; row < filtered.size(); ++row) {
             const auto &c = filtered.at(row);
-            connTable_->setItem(row, 0, new QTableWidgetItem(c.network.toUpper()));
-            connTable_->setItem(row, 1, new QTableWidgetItem(c.process));
-            const QString target = !c.host.isEmpty() ? QStringLiteral("%1 (%2)").arg(c.host, c.destination) : c.destination;
-            connTable_->setItem(row, 2, new QTableWidgetItem(target));
-            connTable_->setItem(row, 3, new QTableWidgetItem(c.rule));
-            connTable_->setItem(row, 4, new QTableWidgetItem(formatBytes(c.upload)));
-            connTable_->setItem(row, 5, new QTableWidgetItem(formatBytes(c.download)));
+            auto setCellText = [this, row](int col, const QString &text) {
+                QTableWidgetItem *item = connTable_->item(row, col);
+                if (item == nullptr) {
+                    item = new QTableWidgetItem(text);
+                    connTable_->setItem(row, col, item);
+                } else if (item->text() != text) {
+                    item->setText(text);
+                }
+            };
 
-            auto *btn = new QPushButton(QStringLiteral("断开"), connTable_);
-            btn->setObjectName(QStringLiteral("Small"));
+            setCellText(0, c.network.toUpper());
+            setCellText(1, c.process);
+            const QString target = !c.host.isEmpty() ? QStringLiteral("%1 (%2)").arg(c.host, c.destination) : c.destination;
+            setCellText(2, target);
+            setCellText(3, c.rule);
+            setCellText(4, formatBytes(c.upload));
+            setCellText(5, formatBytes(c.download));
+
+            auto *btn = qobject_cast<QPushButton *>(connTable_->cellWidget(row, 6));
             const QString id = c.id;
-            connect(btn, &QPushButton::clicked, this, [this, id]() { closeConnection(id); });
-            connTable_->setCellWidget(row, 6, btn);
+            if (btn == nullptr) {
+                btn = new QPushButton(QStringLiteral("断开"), connTable_);
+                btn->setObjectName(QStringLiteral("Small"));
+                connect(btn, &QPushButton::clicked, this, [this, id]() { closeConnection(id); });
+                connTable_->setCellWidget(row, 6, btn);
+            } else {
+                btn->disconnect();
+                connect(btn, &QPushButton::clicked, this, [this, id]() { closeConnection(id); });
+            }
         }
+        connTable_->setUpdatesEnabled(true);
     }
 }
 

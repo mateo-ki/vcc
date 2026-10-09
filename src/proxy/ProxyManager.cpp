@@ -503,6 +503,7 @@ Status verifyLocalProxy(quint16 port, int timeoutMs)
 Status ProxyManager::startWithKernelPath(const Models::Node &node, Kernel::Kind kernel,
                                         const QString &executablePath)
 {
+    QMutexLocker operation(&operationMutex_);
     return startWithPath(node, kernel, executablePath, std::nullopt);
 }
 
@@ -540,21 +541,40 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
     QElapsedTimer startupClock;
     startupClock.start();
 
-    QMutexLocker locker(&runtimeMutex_);
-    const ProxyState state = runtime_.status.state;
-    if (state == ProxyState::Starting || state == ProxyState::Running
-        || state == ProxyState::Stopping) {
-        return Status::failed(QStringLiteral("代理正在运行或切换状态"));
+    MihomoConfigOptions options;
+    {
+        QMutexLocker locker(&runtimeMutex_);
+        const ProxyState state = runtime_.status.state;
+        if (state == ProxyState::Starting || state == ProxyState::Running
+            || state == ProxyState::Stopping) {
+            return Status::failed(QStringLiteral("代理正在运行或切换状态"));
+        }
+        if (runtime_.options.mode == ProxyMode::Tun && !Platform::isElevated()) {
+            return Status::failed(QStringLiteral("TUN 模式需要管理员权限"));
+        }
+
+        runtime_.status.state = ProxyState::Starting;
+        runtime_.status.kernel = kernel;
+        runtime_.status.nodeId = node.id;
+        runtime_.currentNode = node;
+        runtime_.status.message =
+            QStringLiteral("正在启动 %1").arg(Kernel::kindDisplayName(kernel));
+        runtime_.status.localProxyReady = false;
+        runtime_.status.lastError = QString();
+        options = runtime_.options;
     }
-    if (runtime_.options.mode == ProxyMode::Tun && !Platform::isElevated()) {
-        return Status::failed(QStringLiteral("TUN 模式需要管理员权限"));
-    }
+
+    auto fail = [this](const QString &message) -> Status {
+        QMutexLocker locker(&runtimeMutex_);
+        markFailed(runtime_, message);
+        return Status::failed(message);
+    };
 
     // 分流数据库没备好就别急着起内核：半截库会让内核直接拒绝启动，而且报出来的
     // 是一句要人复制才能看懂的长错误。这里缺就补（镜像优先，其次系统代理）。
     if (kernel == Kernel::Kind::Mihomo) {
         bool usesGeo = false;
-        for (const TrafficRule &rule : runtime_.options.rules) {
+        for (const TrafficRule &rule : options.rules) {
             if (rule.usesGeo()) {
                 usesGeo = true;
                 break;
@@ -567,49 +587,35 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
                 const Result<QString> provisioned =
                     Geo::provision(dir, systemProxy.isNull() ? QString() : systemProxy, false);
                 if (provisioned.isErr()) {
-                    return Status::failed(provisioned.error());
+                    return fail(provisioned.error());
                 }
             }
         }
     }
 
-    runtime_.status.state = ProxyState::Starting;
-    runtime_.status.kernel = kernel;
-    runtime_.status.nodeId = node.id;
-    runtime_.currentNode = node;
-    runtime_.status.message =
-        QStringLiteral("正在启动 %1").arg(Kernel::kindDisplayName(kernel));
-    runtime_.status.localProxyReady = false;
-    runtime_.status.lastError = QString();
-
-    const QVector<quint16> ports = kernelRequiredPorts(kernel, runtime_.options);
+    const QVector<quint16> ports = kernelRequiredPorts(kernel, options);
     for (const quint16 port : ports) {
         const Status available = ensurePortAvailable(port);
         if (available.isErr()) {
-            markFailed(runtime_, available.error());
-            return available;
+            return fail(available.error());
         }
     }
 
-    const Result<Json> config = buildKernelConfig(kernel, node, runtime_.options);
+    const Result<Json> config = buildKernelConfig(kernel, node, options);
     if (config.isErr()) {
-        runtime_.status.state = ProxyState::Failed;
-        runtime_.status.message = config.error();
-        return Status::failed(config.error());
+        return fail(config.error());
     }
     const Result<QString> configText = serializeKernelConfig(kernel, config.value());
     if (configText.isErr()) {
         const QString message = QStringLiteral("%1 生成 %2 配置失败")
                                     .arg(Kernel::kindDisplayName(kernel), configText.error());
-        markFailed(runtime_, message);
-        return Status::failed(message);
+        return fail(message);
     }
     Result<ProxyWorkDir> workDir = ProxyWorkDir::create(kernel);
     if (workDir.isErr()) {
         const QString message = QStringLiteral("创建 %1 工作目录失败: %2")
                                     .arg(Kernel::kindDisplayName(kernel), workDir.error());
-        markFailed(runtime_, message);
-        return Status::failed(message);
+        return fail(message);
     }
     const QString path = workDir.value().configPath();
     {
@@ -619,8 +625,7 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
             const QString message =
                 QStringLiteral("写入 %1 配置失败: %2").arg(Kernel::kindDisplayName(kernel),
                                                           file.errorString());
-            markFailed(runtime_, message);
-            return Status::failed(message);
+            return fail(message);
         }
         file.write(configText.value().toUtf8());
         file.close();
@@ -660,15 +665,16 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
         workDir->cleanup();
         const QString message = QStringLiteral("启动 %1 失败: %2")
                                     .arg(Kernel::kindDisplayName(kernel), child->errorString());
-        runtime_.status.state = ProxyState::Failed;
-        runtime_.status.message = message;
-        return Status::failed(message);
+        return fail(message);
     }
     Platform::assignChildProcessId(static_cast<quint32>(child->processId()));
     Log::info(QStringLiteral("代理启动阶段完成: process_spawned, kernel=%1, elapsed_ms=%2")
                   .arg(Kernel::kindDisplayName(kernel))
                   .arg(startupClock.elapsed()));
-    runtime_.status.localProxyReady = true;
+    {
+        QMutexLocker locker(&runtimeMutex_);
+        runtime_.status.localProxyReady = true;
+    }
 
     for (const quint16 port : ports) {
         const qint64 elapsed = startupClock.elapsed();
@@ -684,20 +690,20 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
                         .arg(port)
                 : QStringLiteral("%1 启动失败: %2").arg(Kernel::kindDisplayName(kernel),
                                                         lastNonemptyLine(detail));
-            runtime_.status.state = ProxyState::Failed;
-            runtime_.status.message = message;
-            return Status::failed(message);
+            return fail(message);
         }
     }
     Log::info(QStringLiteral("代理启动阶段完成: port_ready, kernel=%1, elapsed_ms=%2")
                   .arg(Kernel::kindDisplayName(kernel))
                   .arg(startupClock.elapsed()));
 
+    std::optional<SysProxy::Snapshot> activeSysProxy = preservedSnapshot;
+
     if (kVerifyConnectivityOnStart) {
         const qint64 remaining =
             std::max<qint64>(0, kStartupTotalTimeoutMs - startupClock.elapsed());
-        const qint64 reserve = runtime_.options.mode == ProxyMode::System
-                && !preservedSnapshot.has_value()
+        const qint64 reserve = options.mode == ProxyMode::System
+                && !activeSysProxy.has_value()
             ? kStartupSystemProxyReserveMs
             : 0;
         const int verifyTimeout =
@@ -709,34 +715,35 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
             const QString message = QStringLiteral("%1 启动超过 %2 秒，节点验证未执行")
                                         .arg(Kernel::kindDisplayName(kernel))
                                         .arg(kStartupTotalTimeoutMs / 1000);
-            markFailed(runtime_, message);
-            return Status::failed(message);
+            return fail(message);
         }
-        const Status verified = verifyLocalProxy(runtime_.options.mixedPort, verifyTimeout);
+        const Status verified = verifyLocalProxy(options.mixedPort, verifyTimeout);
         if (verified.isErr()) {
             const QString detail = readKernelLog(logPath);
             const QString diagnostic = formatKernelDiagnostic(detail);
             if (diagnostic.contains(QStringLiteral("规则加载中"))
                 || diagnostic.contains(QStringLiteral("自动建立连接"))
                 || diagnostic.contains(QStringLiteral("start initial configuration"))) {
-                if (runtime_.options.mode == ProxyMode::System) {
-                    if (preservedSnapshot) {
-                        runtime_.systemProxySnapshot = preservedSnapshot;
-                    } else if (!runtime_.systemProxySnapshot) {
+                if (options.mode == ProxyMode::System) {
+                    if (!activeSysProxy.has_value()) {
                         const QString server =
-                            QStringLiteral("127.0.0.1:%1").arg(runtime_.options.mixedPort);
+                            QStringLiteral("127.0.0.1:%1").arg(options.mixedPort);
                         std::optional<quint16> terminalPort;
-                        if (runtime_.options.terminalProxy) {
-                            terminalPort = runtime_.options.mixedPort;
+                        if (options.terminalProxy) {
+                            terminalPort = options.mixedPort;
                         }
                         const Result<SysProxy::Snapshot> activated =
                             activateSystemProxy(server, terminalPort);
                         if (activated.isErr()) {
-                            return Status::failed(activated.error());
+                            killChild(child.get());
+                            workDir->cleanup();
+                            return fail(activated.error());
                         }
-                        runtime_.systemProxySnapshot = activated.value();
+                        activeSysProxy = activated.value();
                     }
                 }
+                QMutexLocker locker(&runtimeMutex_);
+                runtime_.systemProxySnapshot = activeSysProxy;
                 runtime_.status.state = ProxyState::Running;
                 runtime_.status.localProxyReady = true;
                 runtime_.status.systemProxyEnabled = runtime_.systemProxySnapshot.has_value();
@@ -752,25 +759,27 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
                 ? QStringLiteral("节点连通性验证失败: %1").arg(verified.error())
                 : QStringLiteral("节点连通性验证失败: %1; %2: %3")
                       .arg(verified.error(), Kernel::kindDisplayName(kernel), diagnostic);
-            if (runtime_.options.mode == ProxyMode::System) {
-                if (preservedSnapshot) {
-                    runtime_.systemProxySnapshot = preservedSnapshot;
-                } else if (!runtime_.systemProxySnapshot) {
+            if (options.mode == ProxyMode::System) {
+                if (!activeSysProxy.has_value()) {
                     const QString server =
-                        QStringLiteral("127.0.0.1:%1").arg(runtime_.options.mixedPort);
+                        QStringLiteral("127.0.0.1:%1").arg(options.mixedPort);
                     std::optional<quint16> terminalPort;
-                    if (runtime_.options.terminalProxy) {
-                        terminalPort = runtime_.options.mixedPort;
+                    if (options.terminalProxy) {
+                        terminalPort = options.mixedPort;
                     }
                     const Result<SysProxy::Snapshot> activated =
                         activateSystemProxy(server, terminalPort);
                     if (activated.isErr()) {
-                        return Status::failed(activated.error());
+                        killChild(child.get());
+                        workDir->cleanup();
+                        return fail(activated.error());
                     }
-                    runtime_.systemProxySnapshot = activated.value();
+                    activeSysProxy = activated.value();
                 }
             }
             // 本地端口已就绪但外部不通：内核继续跑，进入降级状态，系统代理不还原。
+            QMutexLocker locker(&runtimeMutex_);
+            runtime_.systemProxySnapshot = activeSysProxy;
             runtime_.status.state = ProxyState::Degraded;
             runtime_.status.systemProxyEnabled = runtime_.systemProxySnapshot.has_value();
             runtime_.status.lastError = message;
@@ -785,23 +794,20 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
                       .arg(startupClock.elapsed()));
     }
 
-    if (runtime_.options.mode == ProxyMode::System) {
+    if (options.mode == ProxyMode::System) {
         if (startupClock.elapsed() >= kStartupTotalTimeoutMs) {
             killChild(child.get());
             workDir->cleanup();
             const QString message = QStringLiteral("%1 启动超过 %2 秒，系统代理未启用")
                                         .arg(Kernel::kindDisplayName(kernel))
                                         .arg(kStartupTotalTimeoutMs / 1000);
-            markFailed(runtime_, message);
-            return Status::failed(message);
+            return fail(message);
         }
-        if (preservedSnapshot) {
-            runtime_.systemProxySnapshot = preservedSnapshot;
-        } else {
-            const QString server = QStringLiteral("127.0.0.1:%1").arg(runtime_.options.mixedPort);
+        if (!activeSysProxy.has_value()) {
+            const QString server = QStringLiteral("127.0.0.1:%1").arg(options.mixedPort);
             std::optional<quint16> terminalPort;
-            if (runtime_.options.terminalProxy) {
-                terminalPort = runtime_.options.mixedPort;
+            if (options.terminalProxy) {
+                terminalPort = options.mixedPort;
             }
             const Result<SysProxy::Snapshot> activated =
                 activateSystemProxy(server, terminalPort);
@@ -810,10 +816,9 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
                 workDir->cleanup();
                 const QString message =
                     QStringLiteral("启用系统代理失败: %1").arg(activated.error());
-                markFailed(runtime_, message);
-                return Status::failed(message);
+                return fail(message);
             }
-            runtime_.systemProxySnapshot = activated.value();
+            activeSysProxy = activated.value();
         }
         Log::info(QStringLiteral("代理启动阶段完成: system_proxy_enabled, kernel=%1, elapsed_ms=%2")
                       .arg(Kernel::kindDisplayName(kernel))
@@ -821,15 +826,19 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
     }
 
     const quint64 elapsedMs = startupClock.elapsed();
-    runtime_.status.state = ProxyState::Running;
-    runtime_.status.localProxyReady = true;
-    runtime_.status.systemProxyEnabled = runtime_.systemProxySnapshot.has_value();
-    runtime_.status.lastError = QString();
-    runtime_.status.message = QStringLiteral("%1 运行中（启动耗时 %2 ms）")
-                                  .arg(Kernel::kindDisplayName(kernel))
-                                  .arg(elapsedMs);
-    runtime_.child = std::move(child);
-    runtime_.workDir = std::move(workDir.value());
+    {
+        QMutexLocker locker(&runtimeMutex_);
+        runtime_.systemProxySnapshot = activeSysProxy;
+        runtime_.status.state = ProxyState::Running;
+        runtime_.status.localProxyReady = true;
+        runtime_.status.systemProxyEnabled = runtime_.systemProxySnapshot.has_value();
+        runtime_.status.lastError = QString();
+        runtime_.status.message = QStringLiteral("%1 运行中（启动耗时 %2 ms）")
+                                      .arg(Kernel::kindDisplayName(kernel))
+                                      .arg(elapsedMs);
+        runtime_.child = std::move(child);
+        runtime_.workDir = std::move(workDir.value());
+    }
     return Status::succeeded();
 }
 
