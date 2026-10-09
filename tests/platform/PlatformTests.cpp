@@ -168,10 +168,8 @@ TEST(PlatformProcessControl, ProcessSnapshotIsReadOnlyAndSeesItself)
 // ---- Rust mod.rs: named_mutex_allows_only_one_gui_instance ----
 TEST(PlatformSingleInstance, MutexNameIsTheFixedLocalSessionGuid)
 {
-    // Rust 的 SINGLE_INSTANCE_MUTEX_NAME 是写死的，不含 exe 路径：Rust 建的实例和本程序
-    // 必须抢同一把锁，否则两个实例会同时监听 9980。
     EXPECT_EQ(singleInstanceMutexName(),
-              QStringLiteral("Local\\VPNParser-7F61E55C-DB54-49C6-AB9E-986AEBFDD56B"));
+              QStringLiteral("Local\\VCC-7F61E55C-DB54-49C6-AB9E-986AEBFDD56B"));
 }
 
 TEST(PlatformSingleInstance, NamedMutexAllowsOnlyOneGuiInstance)

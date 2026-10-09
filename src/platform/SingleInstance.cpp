@@ -16,10 +16,8 @@ namespace Platform {
 
 namespace {
 
-// Rust 的 `SINGLE_INSTANCE_MUTEX_NAME`：一个写死的 GUID，带 `Local\` 会话前缀。
-// 不是按 exe 路径推导的 —— 机器上同时装着 Rust 建的 vpn-parser.exe 时，
-// 两边必须抢同一把锁，否则会出现两个实例同时监听 9980。
-const char *const kMutexName = "Local\\VPNParser-7F61E55C-DB54-49C6-AB9E-986AEBFDD56B";
+// VCC 的独立命名互斥量，带 Local\ 会话前缀，不与原版 vpn-parser 产生互斥冲突。
+const char *const kMutexName = "Local\\VCC-7F61E55C-DB54-49C6-AB9E-986AEBFDD56B";
 
 }
 

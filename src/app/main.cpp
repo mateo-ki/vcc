@@ -15,8 +15,8 @@
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("vpn-parser"));
-    app.setOrganizationName(QStringLiteral("vpn-parser"));
+    app.setApplicationName(QStringLiteral("vcc"));
+    app.setOrganizationName(QStringLiteral("vcc"));
 
     Log::initialize();
     Log::startup(QStringLiteral("=== Application starting ==="));
@@ -41,7 +41,7 @@ int main(int argc, char **argv)
     const QCommandLineOption dbOption(QStringLiteral("db"),
                                       QStringLiteral("SQLite database path"),
                                       QStringLiteral("db"),
-                                      QStringLiteral("data/vpn-parser.db"));
+                                      QStringLiteral("data/vcc.db"));
     const QCommandLineOption headlessOption(
         QStringLiteral("headless"), QStringLiteral("Headless mode: only run HTTP API (no GUI)"));
     const QCommandLineOption tokenOption(QStringLiteral("api-token"),
