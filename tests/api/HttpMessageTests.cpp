@@ -19,7 +19,7 @@ TEST(HttpMessage, ParsesRequestLineHeadersAndBody)
                            "Host: 127.0.0.1\r\n"
                            "Content-Type: application/json\r\n"
                            "Authorization: Bearer abc123\r\n"
-                           "Content-Length: 5\r\n"
+                           "Content-Length: 7\r\n"
                            "\r\n"
                            "{\"a\":1}xx";
     const Result<std::optional<Request>> parsed = parse(raw, &consumed);
@@ -103,7 +103,7 @@ TEST(HttpMessage, QueryPairsAreFormDecoded)
 {
     int consumed = 0;
     const Result<std::optional<Request>> parsed = parse(
-        "GET /api/nodes?keyword=hello+world&country=JP%20Tokyo&page=2&page=3 HTTP/1.1\r\n\r\n",
+        "GET /api/nodes?keyword=hello+world&country=JP%20Tokyo&page=2&page=3&protocol= HTTP/1.1\r\n\r\n",
         &consumed);
     ASSERT_TRUE(parsed.isOk() && parsed.value().has_value());
     const Request &request = *parsed.value();

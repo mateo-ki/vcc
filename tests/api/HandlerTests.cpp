@@ -100,12 +100,29 @@ TEST_F(HandlerFixture, StatsReflectsSeededRows)
 // ---------------------------------------------------------------------------
 // settings
 // ---------------------------------------------------------------------------
+TEST_F(HandlerFixture, HttpServerFlagRoundTripsThroughTheApi)
+{
+    // 开关这一栏只有"改得动、读得回"才有意义：默认 false，PUT true 之后必须回 true。
+    EXPECT_FALSE(ApiTest::envelopeData(call(QStringLiteral("GET"), QStringLiteral("/api/settings")))
+                     .at("http_server_enabled")
+                     .get<bool>());
+    const Response saved = call(QStringLiteral("PUT"), QStringLiteral("/api/settings"),
+                                QByteArray("{\"http_server_enabled\": true}"));
+    ASSERT_EQ(saved.status, 200);
+    EXPECT_TRUE(ApiTest::envelopeData(saved).at("http_server_enabled").get<bool>());
+    EXPECT_TRUE(ApiTest::envelopeData(call(QStringLiteral("GET"), QStringLiteral("/api/settings")))
+                    .at("http_server_enabled")
+                    .get<bool>());
+}
+
 TEST_F(HandlerFixture, GetSettingsReturnsPersistedShape)
 {
     const Response response = call(QStringLiteral("GET"), QStringLiteral("/api/settings"));
     ASSERT_EQ(response.status, 200);
     const Json data = ApiTest::envelopeData(response);
-    EXPECT_TRUE(data.at("http_server_enabled").get<bool>());
+    // Rust 的 AppSettings::default() 里 http_server_enabled 就是 false，
+    // 所以新库读回来必须是 false —— 断言 true 的那版是测试写错，不是实现错。
+    EXPECT_FALSE(data.at("http_server_enabled").get<bool>());
     EXPECT_EQ(data.at("kernel_source").get<std::string>(), "gh-proxy");
     EXPECT_TRUE(data.contains("speedtest_concurrency"));
     EXPECT_TRUE(data.contains("exclude_keywords"));
