@@ -1,7 +1,6 @@
 #include "gui/Theme.h"
 
 #include <QApplication>
-#include <QGraphicsDropShadowEffect>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QFrame>
@@ -392,17 +391,11 @@ QString styleSheet(const Palette &pal)
 void decorateCard(QFrame *card)
 {
     card->setObjectName(QStringLiteral("Card"));
-    const Palette pal = current();
-    // Qt 样式表没有 box-shadow：浅色主题的 0/6 blur24 rgba(24,44,78,16) 用图形效果实现。
-    if (!pal.light) {
-        card->setGraphicsEffect(nullptr);
-        return;
-    }
-    auto *shadow = new QGraphicsDropShadowEffect(card);
-    shadow->setOffset(0, 6);
-    shadow->setBlurRadius(24);
-    shadow->setColor(QColor(24, 44, 78, 16));
-    card->setGraphicsEffect(shadow);
+    // 不再用 QGraphicsDropShadowEffect：每张卡片一个图形效果会让 Qt 把卡片整体离屏
+    // 合成，节点网格几十张卡 + 1.5s 轮询重绘 = 界面卡死；而且 blur 24 的投影溢出到
+    // 6~8px 的卡片间距之外，视觉上就是"互相挡住"。分层改由样式表的描边负责
+    // （见 styleSheet 里 QFrame#Card 的 border），零运行时成本。
+    card->setGraphicsEffect(nullptr);
 }
 
 }

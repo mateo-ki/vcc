@@ -201,10 +201,20 @@ bool ProxyManager::isRunning() const
 
 ProxyRuntimeStatus ProxyManager::status()
 {
+    QElapsedTimer waitClock;
+    waitClock.start();
     std::optional<ProxyWorkDir> cleanup;
     ProxyRuntimeStatus snapshot;
     {
         QMutexLocker locker(&runtimeMutex_);
+        // 取证：GUI 线程卡顿时，这里等锁的毫秒数就是元凶。startWithPath 目前全程
+        // 持有 runtimeMutex_（内含 waitForPort/verifyLocalProxy 等秒级阻塞），
+        // 代理启动/切换期间每一次 status() 都会被它冻住。
+        const qint64 waitedMs = waitClock.elapsed();
+        if (waitedMs > 50) {
+            Log::warn(QStringLiteral("status() 等待 runtimeMutex_ %1 ms（代理正在启动/切换？）")
+                          .arg(waitedMs));
+        }
         QString exitText;
         if (runtime_.child && childHasExited(runtime_.child.get(), &exitText)) {
             runtime_.child.reset();

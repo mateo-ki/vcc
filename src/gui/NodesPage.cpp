@@ -308,9 +308,9 @@ int NodesPage::gridColumns() const
     return 2;
 }
 
-QWidget *NodesPage::makeNodeCard(const Models::NodeSummary &node)
+QWidget *NodesPage::makeNodeCard(const Models::NodeSummary &node,
+                                 const Proxy::ProxyRuntimeStatus &status)
 {
-    const Proxy::ProxyRuntimeStatus status = context_.proxy().status();
     const bool isSelected = status.nodeId == node.id;
 
     auto *card = new QFrame(gridHost_);
@@ -394,11 +394,32 @@ QWidget *NodesPage::makeNodeCard(const Models::NodeSummary &node)
     return card;
 }
 
-void NodesPage::applyView()
+void NodesPage::applyView(bool force)
 {
     if (grid_ == nullptr) {
         return;
     }
+    const int columns = gridColumns();
+    // 整网格只取一次代理状态：makeNodeCard 每张卡都抢 runtimeMutex_ 的话，
+    // 代理启动/切换期间（锁被秒级持有）会把 GUI 线程直接冻住。
+    const Proxy::ProxyRuntimeStatus status = context_.proxy().status();
+
+    // resize 路径（force=false）：列数、数据与选中节点都没变就不重建整网格。
+    // 拖窗口时每帧重建 50 张卡（各带右键菜单 lambda）是"界面超级卡"的来源之一。
+    // 数据路径（force=true）永远重建：测速改延迟后首节点 id 不变，不能靠指纹判断。
+    const bool sameLayout = !force
+        && columns == lastGridColumns_
+        && currentNodes_.size() == lastRenderedCount_
+        && lastRenderedFirstId_ == (currentNodes_.isEmpty() ? QString() : currentNodes_.first().id)
+        && totalCount_ == lastRenderedTotal_
+        && status.nodeId == lastRenderedSelectedId_;
+    if (sameLayout) {
+        updatePaginationLabel();
+        return;
+    }
+
+    // 重建期间关掉整棵子树的更新：50 张卡的增删只触发一次布局/绘制。
+    gridHost_->setUpdatesEnabled(false);
     while (QLayoutItem *item = grid_->takeAt(0)) {
         if (item->widget() != nullptr) {
             delete item->widget();
@@ -406,20 +427,32 @@ void NodesPage::applyView()
         delete item;
     }
 
-    const int columns = gridColumns();
     if (currentNodes_.isEmpty()) {
         auto *empty = new QLabel(QStringLiteral("当前筛选条件下没有节点"), gridHost_);
         empty->setObjectName(QStringLiteral("Subtitle"));
         grid_->addWidget(empty, 0, 0, 1, columns);
     } else {
         for (int index = 0; index < currentNodes_.size(); ++index) {
-            grid_->addWidget(makeNodeCard(currentNodes_.at(index)), index / columns, index % columns);
+            grid_->addWidget(makeNodeCard(currentNodes_.at(index), status),
+                             index / columns, index % columns);
         }
     }
     for (int col = 0; col < columns; ++col) {
         grid_->setColumnStretch(col, 1);
     }
+    gridHost_->setUpdatesEnabled(true);
 
+    lastGridColumns_ = columns;
+    lastRenderedCount_ = currentNodes_.size();
+    lastRenderedFirstId_ = currentNodes_.isEmpty() ? QString() : currentNodes_.first().id;
+    lastRenderedTotal_ = totalCount_;
+    lastRenderedSelectedId_ = status.nodeId;
+
+    updatePaginationLabel();
+}
+
+void NodesPage::updatePaginationLabel()
+{
     const quint32 totalPages = totalCount_ > 0
         ? static_cast<quint32>((totalCount_ + pageSize_ - 1) / pageSize_)
         : 1;
@@ -545,7 +578,7 @@ void NodesPage::reloadNodes()
             guard->totalCount_ = 0;
             emit guard->statusMessageRequested(resultBox->error());
         }
-        guard->applyView();
+        guard->applyView(/*force=*/true);
     });
 }
 
@@ -553,7 +586,7 @@ void NodesPage::resizeEvent(QResizeEvent *event)
 {
     Page::resizeEvent(event);
     if (!currentNodes_.isEmpty()) {
-        applyView();
+        applyView(/*force=*/false);
     }
 }
 

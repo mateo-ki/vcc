@@ -7,6 +7,7 @@
 #include "models/Node.h"
 #include "proxy/ConfigTypes.h"
 #include "proxy/MihomoConfig.h"
+#include "updater/KernelUpdater.h"
 
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -97,6 +98,7 @@ signals:
 
 private slots:
     void onPollTimer();
+    void onPanelSwitch();
 
 private:
     QWidget *buildStatusCard();
@@ -110,11 +112,15 @@ private:
     // 状态卡片
     void refreshStatusCard();
 
-    // 可用节点
+    // 可用节点栅格
     void reloadNodes();
-    void applyView();
+    /// force=true（数据/筛选变了）永远重建网格；force=false（resize）只在列数与
+    /// 视图指纹不变时跳过，拖窗口不再每帧重建整张节点网格。
+    void applyView(bool force = true);
     int gridColumns() const;
-    QWidget *makeNodeRow(const ProxyViewRow &row);
+    /// status 由 applyView 整网格取一次传进来：每张卡都调 proxy().status() 会
+    /// 反复抢 runtimeMutex_（代理启动/切换期间该锁被秒级持有）。
+    QWidget *makeNodeRow(const ProxyViewRow &row, const Proxy::ProxyRuntimeStatus &status);
 
     // 活跃连接
     struct ActiveConn {
@@ -202,6 +208,10 @@ private:
     ProxySortBy sortBy_ = ProxySortBy::Latency;
     quint64 dataRev_ = 0;
     bool nodesRequested_ = false;
+    // 上一次真正渲染出来的网格指纹（resize 路径据此跳过重建）。
+    int lastGridColumns_ = -1;
+    int lastRenderedRows_ = -1;
+    QString lastRenderedSelectedId_;
 
     // 活跃连接分栏
     QLineEdit *connFilterEdit_ = nullptr;
@@ -255,10 +265,15 @@ private:
     QLabel *netEditableNoticeLabel_ = nullptr;
 
     // 内核管理分栏
+    void openKernelDownloadModal(Kernel::Kind kind);
+    void startKernelUpdate(Kernel::Kind kind, Kernel::Source source, const QString &localFile);
+    void cancelKernelDownload();
+
     QList<Kernel::Info> kernelInfos_;
     QList<Kernel::ReleaseInfo> kernelReleases_;
     QList<KernelRow> kernelRows_;
     std::optional<Kernel::UpdateProgress> kernelProgress_;
+    std::optional<Updater::CancelToken> cancelToken_;
     QWidget *kernelTable_ = nullptr;
     QGridLayout *kernelGrid_ = nullptr;
     QLabel *kernelProgressLabel_ = nullptr;

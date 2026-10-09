@@ -181,8 +181,9 @@ TEST(ProxyPageTests, cardLayeringAndPortInfoComeFromRuntimeStatus)
     auto *card = page->findChild<QFrame *>(QStringLiteral("Card"));
     ASSERT_TRUE(card != nullptr);
     EXPECT_EQ(card->objectName().toStdString(), std::string("Card"));
-    // 浅色主题靠投影分层，不描边。
-    EXPECT_TRUE(card->graphicsEffect() != nullptr);
+    // 分层靠样式表 QFrame#Card 的描边 + 页面底色差；不再挂 QGraphicsDropShadowEffect
+    // （每卡一个图形效果会让整棵子树离屏合成，几十张卡 + 轮询重绘 = 界面卡死）。
+    EXPECT_TRUE(card->graphicsEffect() == nullptr);
 
     const Proxy::ProxyRuntimeStatus status = context->proxy().status();
     EXPECT_TRUE(page->kernelInfoText().contains(QString::number(status.mixedPort)));

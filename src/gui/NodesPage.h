@@ -21,6 +21,10 @@ class QPushButton;
 class QScrollArea;
 QT_END_NAMESPACE
 
+namespace Proxy {
+struct ProxyRuntimeStatus;
+}
+
 namespace Gui {
 
 /// 节点池管理页，对应 Rust `gui/views/nodes.rs` 的 `ui_nodes`。
@@ -52,9 +56,14 @@ private:
 
     void reloadNodes();
     void reloadGroups();
-    void applyView();
+    /// force=true（数据变了）永远重建网格；force=false（resize）只在列数/数据/
+    /// 选中项指纹变化时重建，拖窗口不再每帧重建 50 张卡。
+    void applyView(bool force);
+    void updatePaginationLabel();
     int gridColumns() const;
-    QWidget *makeNodeCard(const Models::NodeSummary &node);
+    /// status 由 applyView 整网格取一次传进来：每张卡都调 proxy().status() 会
+    /// 反复抢 runtimeMutex_（代理启动/切换期间该锁被秒级持有）。
+    QWidget *makeNodeCard(const Models::NodeSummary &node, const Proxy::ProxyRuntimeStatus &status);
 
     void speedtestPage();
     void speedtestCurrentGroup();
@@ -96,6 +105,13 @@ private:
     QVector<Models::NodeGroupSummary> groups_;
     bool busy_ = false;
     bool loading_ = false;
+
+    // 上一次真正渲染出来的网格指纹（resize 路径据此跳过重建）。
+    int lastGridColumns_ = -1;
+    qint64 lastRenderedCount_ = -1;
+    QString lastRenderedFirstId_;
+    qint64 lastRenderedTotal_ = -1;
+    QString lastRenderedSelectedId_;
 };
 
 }

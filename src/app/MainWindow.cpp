@@ -1,14 +1,17 @@
 #include "app/MainWindow.h"
 
+#include <QElapsedTimer>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPixmap>
 #include <QPushButton>
+#include <QStyle>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include "app/AppContext.h"
+#include "core/Log.h"
 #include "db/Database.h"
 #include "gui/IpRiskDialog.h"
 #include "gui/NodesPage.h"
@@ -247,15 +250,19 @@ void MainWindow::updateStatusControls()
     const auto config = context_.proxy().config();
 
     if (btnToggleProxy_ != nullptr) {
-        if (isRunning) {
-            btnToggleProxy_->setText(QStringLiteral("停止代理"));
-            btnToggleProxy_->setObjectName(QStringLiteral("Danger"));
-        } else {
-            btnToggleProxy_->setText(QStringLiteral("启动代理"));
-            btnToggleProxy_->setObjectName(QStringLiteral("Primary"));
+        const QString wantedName = isRunning ? QStringLiteral("Danger") : QStringLiteral("Primary");
+        const QString wantedText = isRunning ? QStringLiteral("停止代理") : QStringLiteral("启动代理");
+        if (btnToggleProxy_->objectName() != wantedName) {
+            btnToggleProxy_->setObjectName(wantedName);
+            // 换了 objectName 后只重解析这一颗按钮的样式。以前这里是
+            // Theme::apply(currentId())——那等于 app->setStyleSheet(整张表)，
+            // 会让全窗口每个控件重新解析一遍 QSS（Qt 里最贵的操作之一），
+            // 点节点/切代理时"卡一下"就是这么来的。
+            btnToggleProxy_->style()->unpolish(btnToggleProxy_);
+            btnToggleProxy_->style()->polish(btnToggleProxy_);
         }
+        btnToggleProxy_->setText(wantedText);
         btnToggleProxy_->setEnabled(true);
-        Theme::apply(Theme::currentId());
     }
 
     if (btnModeChip_ != nullptr) {
@@ -383,7 +390,16 @@ void MainWindow::selectTab(Tab tab)
     }
     auto *pageWidget = qobject_cast<Page *>(pages_->currentWidget());
     if (pageWidget != nullptr) {
+        // 取证：切页卡顿到底花在哪。refresh() 是同步跑在 GUI 线程上的，
+        // SourcesPage/NodesPage 里它直接查库、ProxyPage 里它调 status()（可能等 runtimeMutex_）。
+        QElapsedTimer clock;
+        clock.start();
         pageWidget->refresh();
+        const qint64 ms = clock.elapsed();
+        if (ms > 30) {
+            Log::warn(QStringLiteral("切页 tab=%1 的 refresh() 在 GUI 线程耗时 %2 ms")
+                          .arg(int(tab)).arg(ms));
+        }
     }
 }
 

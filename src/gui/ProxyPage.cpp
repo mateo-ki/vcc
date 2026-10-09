@@ -4,6 +4,7 @@
 #include <QClipboard>
 #include <QCursor>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -32,15 +33,19 @@
 #include <memory>
 
 #include "app/AppContext.h"
+#include "core/Log.h"
 #include "db/Database.h"
 #include "geo/Geo.h"
 #include "gui/CountryNames.h"
 #include "gui/FlowLayout.h"
 #include "gui/IpRiskDialog.h"
+#include "gui/KernelDownloadDialog.h"
 #include "gui/KernelPanel.h"
 #include "gui/NodeText.h"
 #include "gui/Prepare.h"
 #include "gui/Theme.h"
+#include "kernel/KernelSource.h"
+#include "updater/KernelUpdater.h"
 #include "gui/UiText.h"
 #include "gui/Widgets.h"
 #include "kernel/KernelManager.h"
@@ -186,7 +191,7 @@ ProxyPage::ProxyPage(App::AppContext &context, QWidget *parent)
 
     connect(panels_, &QTabBar::currentChanged, this, [this](int index) {
         stack_->setCurrentIndex(index);
-        refresh();
+        onPanelSwitch();
     });
     root->addWidget(stack_, 1);
 
@@ -1510,10 +1515,7 @@ QWidget *ProxyPage::buildKernelsPanel()
     kernelCancelButton_ = new QPushButton(UiText::kernelCancelDownload(), panel);
     kernelCancelButton_->setObjectName(QStringLiteral("Danger"));
     kernelCancelButton_->setVisible(false);
-    connect(kernelCancelButton_, &QPushButton::clicked, this, [this]() {
-        emit kernelCancelRequested();
-        emit statusMessageRequested(UiText::kernelCancellingStatus());
-    });
+    connect(kernelCancelButton_, &QPushButton::clicked, this, &ProxyPage::cancelKernelDownload);
     actions->addWidget(kernelCancelButton_);
     box->addLayout(actions);
 
@@ -1620,7 +1622,7 @@ void ProxyPage::layoutKernelColumns()
         btn->setToolTip(row.hover);
         const Kernel::Kind kind = row.kind;
         connect(btn, &QPushButton::clicked, this, [this, kind]() {
-            emit kernelUpdateRequested(kind);
+            openKernelDownloadModal(kind);
         });
         kernelGrid_->addWidget(btn, gridRow, 5);
     }
@@ -1631,6 +1633,116 @@ void ProxyPage::layoutKernelColumns()
     kernelGrid_->setColumnStretch(3, 0);
     kernelGrid_->setColumnStretch(4, 2);
     kernelGrid_->setColumnStretch(5, 0);
+}
+
+void ProxyPage::openKernelDownloadModal(Kernel::Kind kind)
+{
+    const auto proxyStatus = context_.proxy().status();
+    if (proxyStatus.kernelInUse(kind)) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("停止代理后才能更新 %1").arg(Kernel::kindDisplayName(kind)));
+        return;
+    }
+    if (kernelBusy_) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("正在下载或更新内核，请稍候"));
+        return;
+    }
+
+    const QString currentSourceId = context_.settings().kernelSource;
+    const Kernel::Source defaultSource = Kernel::sourceFromId(currentSourceId);
+
+    KernelDownloadDialog dlg(kind, defaultSource, proxyStatus.localProxyActive(), this);
+    if (dlg.exec() == QDialog::Accepted) {
+        const Kernel::Source source = dlg.selectedSource();
+        const QString localFile = dlg.localFilePath();
+
+        Models::UpdateSettings patch;
+        patch.kernelSource = Kernel::sourceId(source);
+        context_.saveSettings(patch);
+
+        emit kernelUpdateRequested(kind);
+        startKernelUpdate(kind, source, localFile);
+    }
+}
+
+void ProxyPage::startKernelUpdate(Kernel::Kind kind, Kernel::Source source, const QString &localFile)
+{
+    if (kernelBusy_) {
+        return;
+    }
+    const auto proxyStatus = context_.proxy().status();
+    if (proxyStatus.kernelInUse(kind)) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("停止代理后才能更新 %1").arg(Kernel::kindDisplayName(kind)));
+        return;
+    }
+
+    setKernelBusy(true);
+    setKernelProgress(std::nullopt);
+
+    Updater::CancelToken cancelToken;
+    cancelToken_ = cancelToken;
+
+    const QString appProxy = proxyStatus.localProxyActive()
+        ? QStringLiteral("http://127.0.0.1:%1").arg(proxyStatus.mixedPort)
+        : QString();
+
+    const QString root = QStringLiteral("data/kernels");
+
+    auto resultBox = std::make_shared<Result<Kernel::UpdateResult>>(
+        Result<Kernel::UpdateResult>::withError(QStringLiteral("未执行")));
+
+    QPointer<ProxyPage> guard(this);
+
+    emit statusMessageRequested(QStringLiteral("正在下载并校验 %1（%2）...")
+                                    .arg(Kernel::kindDisplayName(kind), Kernel::sourceLabel(source)));
+
+    context_.runAsync(
+        [kind, source, localFile, cancelToken, appProxy, root, resultBox, guard]() {
+            const Updater::KernelUpdater updater = Updater::KernelUpdater::create(root, appProxy);
+            *resultBox = updater.update(
+                kind, source, localFile, cancelToken,
+                [guard](const Kernel::UpdateProgress &progress) {
+                    if (guard.isNull()) return;
+                    QMetaObject::invokeMethod(guard, [guard, progress]() {
+                        if (!guard.isNull()) {
+                            guard->setKernelProgress(progress);
+                        }
+                    }, Qt::QueuedConnection);
+                });
+        },
+        [guard, kind, resultBox]() {
+            if (guard.isNull()) {
+                return;
+            }
+            guard->setKernelBusy(false);
+            guard->setKernelProgress(std::nullopt);
+            guard->cancelToken_.reset();
+
+            if (resultBox->isOk()) {
+                const auto &res = resultBox->value();
+                guard->emit statusMessageRequested(res.message.isEmpty()
+                    ? QStringLiteral("%1 更新成功").arg(Kernel::kindDisplayName(kind))
+                    : res.message);
+                QMessageBox::information(guard, QStringLiteral("下载完成"),
+                    QStringLiteral("%1 安装成功：%2").arg(Kernel::kindDisplayName(kind), res.version));
+            } else {
+                guard->emit statusMessageRequested(QStringLiteral("%1 更新失败: %2")
+                    .arg(Kernel::kindDisplayName(kind), resultBox->error()));
+                QMessageBox::warning(guard, QStringLiteral("下载失败"),
+                    QStringLiteral("%1 安装失败: %2").arg(Kernel::kindDisplayName(kind), resultBox->error()));
+            }
+            guard->reloadKernels();
+        });
+}
+
+void ProxyPage::cancelKernelDownload()
+{
+    if (cancelToken_.has_value()) {
+        cancelToken_->cancel();
+    }
+    emit kernelCancelRequested();
+    emit statusMessageRequested(UiText::kernelCancellingStatus());
 }
 
 QWidget *ProxyPage::buildLogsPanel()
@@ -1717,8 +1829,23 @@ void ProxyPage::copyLogs()
     }
 }
 
+void ProxyPage::onPanelSwitch()
+{
+    // 取证：页内 tab 切换的同步代价（Rules/Network 读代理配置也要拿 runtimeMutex_）。
+    QElapsedTimer clock;
+    clock.start();
+    refresh();
+    const qint64 ms = clock.elapsed();
+    if (ms > 30) {
+        Log::warn(QStringLiteral("控制台页内切换 panel=%1 耗时 %2 ms")
+                      .arg(int(currentPanel())).arg(ms));
+    }
+}
+
 void ProxyPage::onPollTimer()
 {
+    QElapsedTimer clock;
+    clock.start();
     const auto status = context_.proxy().status();
     refreshStatusCard();
 
@@ -1728,6 +1855,12 @@ void ProxyPage::onPollTimer()
         reloadLogs();
     } else if (status.localProxyActive()) {
         reloadConnections();
+    }
+    // 取证：每 1.5 秒一次的轮询如果耗时异常，说明 status() 在等 runtimeMutex_
+    // （代理启动/切换期间 startWithPath 全程持锁）。
+    const qint64 ms = clock.elapsed();
+    if (ms > 50) {
+        Log::warn(QStringLiteral("onPollTimer 耗时 %1 ms").arg(ms));
     }
 }
 
@@ -1789,7 +1922,7 @@ void ProxyPage::reloadNodes()
         });
 }
 
-void ProxyPage::applyView()
+void ProxyPage::applyView(bool force)
 {
     view_ = buildProxyView(allNodes_, regionFilter_, search_, sortBy_, dataRev_);
     if (countLabel_ != nullptr) {
@@ -1798,6 +1931,23 @@ void ProxyPage::applyView()
     if (grid_ == nullptr) {
         return;
     }
+
+    const int cols = gridColumns();
+    // 整网格只取一次代理状态：makeNodeRow 每张卡都抢 runtimeMutex_ 的话，
+    // 代理启动/切换期间（锁被秒级持有）会把 GUI 线程直接冻住。
+    const Proxy::ProxyRuntimeStatus status = context_.proxy().status();
+
+    // resize 路径（force=false）：列数、筛选结果、选中节点都没变就不重建整网格。
+    // 数据/筛选路径（force=true）永远重建。拖窗口每帧重建几十张卡是卡顿来源之一。
+    const bool sameLayout = !force
+        && cols == lastGridColumns_
+        && view_.rows.size() == lastRenderedRows_
+        && status.nodeId == lastRenderedSelectedId_;
+    if (sameLayout) {
+        return;
+    }
+
+    gridHost_->setUpdatesEnabled(false);
     while (QLayoutItem *item = grid_->takeAt(0)) {
         if (item->widget() != nullptr) {
             item->widget()->deleteLater();
@@ -1805,11 +1955,15 @@ void ProxyPage::applyView()
         delete item;
     }
 
-    const int cols = gridColumns();
     for (int i = 0; i < view_.rows.size(); ++i) {
-        QWidget *card = makeNodeRow(view_.rows.at(i));
+        QWidget *card = makeNodeRow(view_.rows.at(i), status);
         grid_->addWidget(card, i / cols, i % cols);
     }
+    gridHost_->setUpdatesEnabled(true);
+
+    lastGridColumns_ = cols;
+    lastRenderedRows_ = view_.rows.size();
+    lastRenderedSelectedId_ = status.nodeId;
 }
 
 int ProxyPage::gridColumns() const
@@ -1820,7 +1974,7 @@ int ProxyPage::gridColumns() const
     return 2;
 }
 
-QWidget *ProxyPage::makeNodeRow(const ProxyViewRow &row)
+QWidget *ProxyPage::makeNodeRow(const ProxyViewRow &row, const Proxy::ProxyRuntimeStatus &status)
 {
     auto *card = new QFrame(gridHost_);
     Theme::decorateCard(card);
@@ -1843,7 +1997,6 @@ QWidget *ProxyPage::makeNodeRow(const ProxyViewRow &row)
     topLine->addWidget(flagLabel);
     topLine->addStretch();
 
-    const auto status = context_.proxy().status();
     if (status.localProxyActive() && status.nodeId == row.node.id) {
         auto *activeBadge = new QLabel(QStringLiteral("运行中"), card);
         activeBadge->setObjectName(QStringLiteral("SuccessPill"));
@@ -1907,7 +2060,7 @@ void ProxyPage::resizeEvent(QResizeEvent *event)
 {
     Page::resizeEvent(event);
     if (currentPanel() == Panel::Nodes) {
-        applyView();
+        applyView(/*force=*/false);
     }
 }
 

@@ -171,8 +171,11 @@ TEST(GuiShell, applyingThemeInstallsStylesheetForWholeApp)
     QFrame card;
     Gui::Theme::decorateCard(&card);
     EXPECT_EQ(card.objectName().toStdString(), std::string("Card"));
-    EXPECT_TRUE(card.graphicsEffect() != nullptr);
-    // 深色那套（现在只剩浅色，这里是防御）：不描边不投影就分层不出来。
+    // 分层靠样式表里 QFrame#Card 的描边 + 页面底色差，不再挂 QGraphicsDropShadowEffect：
+    // 每张卡一个图形效果会让 Qt 离屏合成整棵子树，节点网格几十张卡 + 轮询重绘 = 界面卡死，
+    // 而且 blur 溢出到卡片间距外会糊到邻居（用户 2026-10-09 报的"超级卡 + 互相挡住"）。
+    EXPECT_TRUE(card.graphicsEffect() == nullptr);
+    // 深色那套（现在只剩浅色，这里是防御）。
     Gui::Theme::apply(QStringLiteral("soft-cobalt"));
 }
 

@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QElapsedTimer>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
@@ -28,6 +29,7 @@
 #include "collector/Collector.h"
 #include "collector/GistDiscovery.h"
 #include "collector/Telegram.h"
+#include "core/Log.h"
 #include "db/Database.h"
 #include "db/DatabaseTelemetry.h"
 #include "gui/Pages.h"
@@ -541,8 +543,18 @@ QWidget *SourcesPage::buildSourcesTable()
         QStringLiteral("健康"),
         QStringLiteral("操作")
     });
-    sourcesTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    sourcesTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Interactive);
+    sourcesTable_->setColumnWidth(0, 140);
     sourcesTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    sourcesTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Interactive);
+    sourcesTable_->setColumnWidth(2, 130);
+    sourcesTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Interactive);
+    sourcesTable_->setColumnWidth(3, 140);
+    sourcesTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Interactive);
+    sourcesTable_->setColumnWidth(4, 95);
+    sourcesTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Interactive);
+    sourcesTable_->setColumnWidth(5, 360);
+    sourcesTable_->verticalHeader()->setDefaultSectionSize(68);
     sourcesTable_->setAlternatingRowColors(true);
     sourcesTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     sourcesTable_->verticalHeader()->setVisible(false);
@@ -603,6 +615,8 @@ void SourcesPage::refresh()
 
 void SourcesPage::reloadSources()
 {
+    QElapsedTimer clock;
+    clock.start();
     auto sourcesResult = context_.database().listSources();
     if (sourcesResult.isOk()) {
         sources_ = sourcesResult.takeValue();
@@ -619,8 +633,14 @@ void SourcesPage::reloadSources()
             }
         }
     }
+    const qint64 queryMs = clock.elapsed();
 
     populateSourcesTable();
+    // 取证：这两条查询 + 填表全在 GUI 线程同步跑。
+    if (queryMs > 30) {
+        Log::warn(QStringLiteral("订阅源页同步查库耗时 %1 ms（源 %2 个）")
+                      .arg(queryMs).arg(sources_.size()));
+    }
 }
 
 void SourcesPage::populateSourcesTable()
@@ -629,25 +649,29 @@ void SourcesPage::populateSourcesTable()
     const bool proxyAvailable = subscriptionProxyUrl().has_value();
 
     for (int i = 0; i < sources_.size(); ++i) {
+        sourcesTable_->setRowHeight(i, 68);
         const auto &s = sources_.at(i);
         const QString sourceId = s.id;
 
         // 0: 名称
         auto *nameItem = new QTableWidgetItem(s.name);
         nameItem->setFont(QFont(font().family(), -1, QFont::Bold));
+        nameItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
         sourcesTable_->setItem(i, 0, nameItem);
 
         // 1: URL 模板
         auto *urlItem = new QTableWidgetItem(s.urlTemplate);
         urlItem->setToolTip(s.urlTemplate);
         urlItem->setForeground(QColor(QStringLiteral("#3b82f6")));
+        urlItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
         sourcesTable_->setItem(i, 1, urlItem);
 
         // 2: 状态容器
         auto *statusContainer = new QWidget(sourcesTable_);
         auto *statusBox = new QVBoxLayout(statusContainer);
-        statusBox->setContentsMargins(6, 4, 6, 4);
+        statusBox->setContentsMargins(6, 6, 6, 6);
         statusBox->setSpacing(2);
+        statusBox->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 
         auto *badge = new QLabel(s.enabled ? QStringLiteral("启用") : QStringLiteral("停用"), statusContainer);
         badge->setStyleSheet(s.enabled ? QStringLiteral("color: #10b981; font-weight: 700;")
@@ -691,8 +715,9 @@ void SourcesPage::populateSourcesTable()
         // 3: 最近拉取
         auto *recentContainer = new QWidget(sourcesTable_);
         auto *recentBox = new QVBoxLayout(recentContainer);
-        recentBox->setContentsMargins(6, 4, 6, 4);
+        recentBox->setContentsMargins(6, 6, 6, 6);
         recentBox->setSpacing(2);
+        recentBox->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 
         QString timeStr = QStringLiteral("-");
         if (s.lastFetchAt.hasValue) {
@@ -710,8 +735,9 @@ void SourcesPage::populateSourcesTable()
         // 4: 健康
         auto *healthContainer = new QWidget(sourcesTable_);
         auto *healthBox = new QVBoxLayout(healthContainer);
-        healthBox->setContentsMargins(6, 4, 6, 4);
+        healthBox->setContentsMargins(6, 6, 6, 6);
         healthBox->setSpacing(2);
+        healthBox->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 
         const qint64 total = std::max<qint64>(0, s.lastNodeCount);
         const qint64 alive = groupAliveCounts_.value(s.id, 0);
@@ -729,35 +755,46 @@ void SourcesPage::populateSourcesTable()
         // 5: 操作按钮
         auto *actionsWidget = new QWidget(sourcesTable_);
         auto *actionsBox = new QHBoxLayout(actionsWidget);
-        actionsBox->setContentsMargins(4, 2, 4, 2);
-        actionsBox->setSpacing(4);
+        actionsBox->setContentsMargins(4, 8, 4, 8);
+        actionsBox->setSpacing(5);
+        actionsBox->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 
         const bool retry = !s.lastStatus.isEmpty() &&
                            (s.lastStatus.contains(QStringLiteral("失败")) ||
                             s.lastStatus.contains(QStringLiteral("超时")) ||
                             s.lastStatus.contains(QStringLiteral("error")));
         auto *fetchBtn = new QPushButton(retry ? QStringLiteral("重试") : QStringLiteral("拉取"), actionsWidget);
+        fetchBtn->setObjectName(QStringLiteral("Small"));
+        fetchBtn->setFixedHeight(28);
         fetchBtn->setEnabled(!busy_);
         connect(fetchBtn, &QPushButton::clicked, this, [this, sourceId]() { fetchOne(sourceId); });
         actionsBox->addWidget(fetchBtn);
 
         auto *fetchProxyBtn = new QPushButton(QStringLiteral("代理拉取"), actionsWidget);
+        fetchProxyBtn->setObjectName(QStringLiteral("Small"));
+        fetchProxyBtn->setFixedHeight(28);
         fetchProxyBtn->setEnabled(!busy_ && proxyAvailable);
         fetchProxyBtn->setToolTip(QStringLiteral("通过当前运行中的本地代理拉取此订阅源"));
         connect(fetchProxyBtn, &QPushButton::clicked, this, [this, sourceId]() { fetchOneViaProxy(sourceId); });
         actionsBox->addWidget(fetchProxyBtn);
 
         auto *editBtn = new QPushButton(QStringLiteral("编辑"), actionsWidget);
+        editBtn->setObjectName(QStringLiteral("Small"));
+        editBtn->setFixedHeight(28);
         connect(editBtn, &QPushButton::clicked, this, [this, s]() { openEditForm(s); });
         actionsBox->addWidget(editBtn);
 
         auto *toggleBtn = new QPushButton(s.enabled ? QStringLiteral("禁用") : QStringLiteral("启用"), actionsWidget);
+        toggleBtn->setObjectName(QStringLiteral("Small"));
+        toggleBtn->setFixedHeight(28);
         connect(toggleBtn, &QPushButton::clicked, this, [this, sourceId, s]() {
             toggleSourceEnabled(sourceId, !s.enabled);
         });
         actionsBox->addWidget(toggleBtn);
 
         auto *pushBtn = new QPushButton(s.pushDisabled ? QStringLiteral("恢复推送") : QStringLiteral("不推送"), actionsWidget);
+        pushBtn->setObjectName(QStringLiteral("Small"));
+        pushBtn->setFixedHeight(28);
         connect(pushBtn, &QPushButton::clicked, this, [this, sourceId, s]() {
             toggleSourcePush(sourceId, !s.pushDisabled);
         });
@@ -765,6 +802,7 @@ void SourcesPage::populateSourcesTable()
 
         auto *deleteBtn = new QPushButton(QStringLiteral("删除"), actionsWidget);
         deleteBtn->setObjectName(QStringLiteral("Danger"));
+        deleteBtn->setFixedHeight(28);
         connect(deleteBtn, &QPushButton::clicked, this, [this, sourceId]() { deleteSource(sourceId); });
         actionsBox->addWidget(deleteBtn);
 
