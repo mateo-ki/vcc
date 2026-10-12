@@ -13,8 +13,11 @@ on:
   workflow_dispatch:
 
 env:
-  VCPKG_ROOT: ${{ github.workspace }}/../vcpkg
-  # 编出来的包一律可重复下载：files 源在 jobs 之间靠 actions/cache 传。
+  # 故意不叫 VCPKG_ROOT：ilammy/msvc-dev-cmd 会把 VCPKG_ROOT 设成 VS 自带那份 vcpkg，
+  # 而 VS 带的 vcpkg 与本仓库的 baseline 无关，用它就会撞上 "requires a manifest with a
+  # specified baseline"（CI 第一次红就是这么来的）。自己的变量名没人覆盖。
+  VCC_VCPKG: ${{ github.workspace }}/../vcpkg-ci
+  # 编出来的包一律可重复获取：files 源在 jobs 之间靠 actions/cache 传。
   VCPKG_BINARY_SOURCES: files;${{ github.workspace }}/../vcpkg-cache;readwrite
 
 jobs:
@@ -29,15 +32,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.VCPKG_ROOT }}
+            ${{ env.VCC_VCPKG }}
             ${{ github.workspace }}/../vcpkg-cache
           key: vcpkg-${{ runner.os }}-${{ hashFiles('ci/vcpkg.json') }}
 
       - name: Bootstrap vcpkg
         shell: bash
         run: |
-          git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT" || true
-          "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+          if [ ! -d "$VCC_VCPKG/scripts" ]; then
+            git clone --depth 1 https://github.com/microsoft/vcpkg "$VCC_VCPKG"
+          fi
+          "$VCC_VCPKG/bootstrap-vcpkg.bat" -disableMetrics
 
       - name: Set up MSVC + Ninja + CMake on PATH
         uses: ilammy/msvc-dev-cmd@v1
@@ -46,7 +51,7 @@ jobs:
         shell: bash
         run: |
           cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE/ci" -DVCC_BUILD_TESTS=ON
 
       - name: Build everything
@@ -56,7 +61,7 @@ jobs:
         shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
-          QT_PLUGIN_PATH: ${{ github.workspace }}/../vcpkg/installed/x64-windows/debug/Qt6/plugins
+          QT_PLUGIN_PATH: ${{ github.workspace }}/../vcpkg-ci/installed/x64-windows/debug/Qt6/plugins
         run: ctest --test-dir build-ninja -j8 --output-on-failure
 
       - name: Static guards (layer boundaries, single colour source)
@@ -77,15 +82,17 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            ${{ env.VCPKG_ROOT }}
+            ${{ env.VCC_VCPKG }}
             ${{ github.workspace }}/../vcpkg-cache
           key: vcpkg-${{ runner.os }}-${{ hashFiles('ci/vcpkg.json') }}
 
       - name: Bootstrap vcpkg
         shell: bash
         run: |
-          git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT" || true
-          "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+          if [ ! -d "$VCC_VCPKG/scripts" ]; then
+            git clone --depth 1 https://github.com/microsoft/vcpkg "$VCC_VCPKG"
+          fi
+          "$VCC_VCPKG/bootstrap-vcpkg.bat" -disableMetrics
 
       - uses: actions/setup-node@v4
         with:
@@ -125,7 +132,7 @@ jobs:
         shell: bash
         run: |
           cmake -S . -B build-rel -G "Visual Studio 17 2022" -A x64 \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE/ci" -DVCC_BUILD_TESTS=OFF
           node tools/package.mjs build-rel
 

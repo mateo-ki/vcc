@@ -7,8 +7,14 @@ if(WIN32)
         set(_VCC_VCPKG_ROOT "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
     elseif(DEFINED Qt6_DIR)
         get_filename_component(_VCC_VCPKG_ROOT "${Qt6_DIR}/../.." ABSOLUTE)
+    elseif(DEFINED ENV{VCPKG_ROOT})
+        # 仓库里不写死任何机器上的 vcpkg 位置。
+        set(_VCC_VCPKG_ROOT "$ENV{VCPKG_ROOT}/installed/x64-windows")
     else()
-        set(_VCC_VCPKG_ROOT "D:/vcpkg/installed/x64-windows")
+        message(FATAL_ERROR
+            "DeployRuntime: 找不到 vcpkg 安装树。用 vcpkg 的工具链配置（"
+            "-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake），"
+            "或者设置环境变量 VCPKG_ROOT。")
     endif()
 
     set(_QT_PLUGIN_DIR_DEBUG "${_VCC_VCPKG_ROOT}/debug/Qt6/plugins")

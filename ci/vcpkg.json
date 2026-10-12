@@ -1,6 +1,7 @@
 {
   "name": "vcc-ci",
   "description": "CI-only dependency manifest. The repo root stays manifest-free on purpose: the local tree is a vcpkg classic install, and dropping a vcpkg.json at the root flips every local build into manifest mode (which rebuilds Qt from source). See CMakeLists.txt.",
+  "builtin-baseline": "e456309491fd875487bf02b8a0dca76c1b1b00cc",
   "dependencies": [
     "libarchive",
     "nlohmann-json",
