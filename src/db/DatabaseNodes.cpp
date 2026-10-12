@@ -1066,7 +1066,7 @@ Result<int> Database::cleanAndBeautifyNodeNames()
             }
         }
 
-        // 一个分库一个事务：逐条 UPDATE 在 19000 个节点上就是 19000 次提交。
+        // 一个分库一个事务：逐条 UPDATE 在上万个节点上就是上万次提交。
         Transaction transaction(pool.value()->acquire());
         Connection *connection = transaction.connection();
         for (const auto &rename : renames) {
@@ -1146,7 +1146,7 @@ Result<qint64> Database::scrubInvalidHosts()
 Result<qint64> Database::deleteInvalidHosts()
 {
     // 按分库分组批量删：以前是每个节点都 find_node_pool 扫一遍全部分库，
-    // 19000 个节点 × 34 个库 ≈ 65 万次查询。
+    // 上万节点 × 几十个库 ≈ 几十万次查询。
     QHash<QString, QVector<QString>> byScope;
     QVector<QString> scopeOrder;
     const QVector<QString> scopes = nodeScopes(QString());

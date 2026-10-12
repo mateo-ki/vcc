@@ -412,8 +412,8 @@ TEST(GuiShell, autoSpeedtestOnlyFiresWhenEnabledAndNodesArrive)
 /// 底部状态栏那颗「测速全部」必须跟着节点池的强度下拉框走。Rust 全应用只有
 /// 一个 `speedtest_intensity`，每一条测速入口都从同一个 `speed_opts()` 取参数；
 /// 我们这边一旦把它钉成默认档，同一句「测速全部」就会在两个入口用两个超时 ——
-/// 表现正是"vpn-parser 测得到的节点，vcc 测不到"（他那些 Cloudflare Worker 型
-/// 出口冷启动实测 3.1–4.9 秒，2500ms 的标准档必挂）。
+/// 表现正是"另一个客户端测得到的节点，vcc 测不到"（挂在 Cloudflare Worker 后面的
+/// 出口冷启动可达数秒，2500ms 的标准档必挂）。
 TEST(GuiShell, bottomBarTestAllFollowsTheNodesPageIntensityKnob)
 {
     QTemporaryDir directory;

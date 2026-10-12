@@ -494,7 +494,7 @@ Result<Models::SpeedTestSummary> SpeedTester::testAllSourcesGlobally(
             const Tasks::Phase phase = state.phase == SpeedTestPhase::TcpPrefilter
                 ? Tasks::Phase::TcpPrefilter
                 : Tasks::Phase::GoogleVerify;
-            // 每个节点都刷全部源的阶段太浪费（一轮 19000 节点 = 62 万次加锁+扫描），
+            // 每个节点都刷全部源的阶段太浪费（一轮上万节点就是几十万次加锁+扫描），
             // 每 200 个节点或收尾时刷一次即可。
             if (state.done % 200 == 0 || state.done >= state.total) {
                 for (const QString &sourceId : sourceKeys) {
@@ -636,8 +636,8 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
 
     // ---- 解析：每个不同的 (host, port) 仍然只查一次，但**不再先做完整轮才开测** ----
     // 原来这里有一道 resolver.waitAll() 栅栏：所有唯一 host 解析完才开始 TCP 预筛，
-    // 而栅栏期间一个进度回调都没有 —— 15175 个唯一节点时状态栏开局就停在
-    // "已完成 0/15175"好几分钟。resolveAddresses 走 QHostInfo::fromName（本线程
+    // 而栅栏期间一个进度回调都没有 —— 上万个唯一节点时状态栏开局就停在
+    // "已完成 0/总数"好几分钟。resolveAddresses 走 QHostInfo::fromName（本线程
     // getaddrinfo、不可取消，800ms 只是事后判定），域名节点一多就被放大。
     // 现在改成惰性解析：memo 里没有就在这个节点的作业里自己查，结果由驱动线程在
     // applier 里塞回 memo，后面的同 host 节点直接复用。这是对 Rust 的偏离

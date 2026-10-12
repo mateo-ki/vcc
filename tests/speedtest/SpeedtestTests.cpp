@@ -416,8 +416,8 @@ TEST(SpeedtestPort, SpeedOptionsComeFromSettingsAndIntensity)
 }
 
 /// JobQueue 必须**边提交边消费**完成项。原来 submit 只抢信号量就返回，applier 全堆到
-/// waitAll 才执行 —— 测速的进度回调都在 applier 里，于是 15175 个节点那一轮里状态栏
-/// 一直停在"已完成 0/15175"，跑完才瞬间跳到末尾（他 2026-10-12 报的第一条）。
+/// waitAll 才执行 —— 测速的进度回调都在 applier 里，于是整轮（上万个节点）跑的过程中
+/// 状态栏一直停在"已完成 0/总数"，跑完才瞬间跳到末尾。
 TEST(SpeedtestPort, JobQueueRunsAppliersWhileStillSubmitting)
 {
     JobQueue queue(2);

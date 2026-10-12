@@ -122,7 +122,7 @@ Result<std::shared_ptr<AppContext>> AppContext::create(const Options &options)
     }
 
     // 连接池空闲回收。Rust 那边是 sqlx 池自带的后台维护任务（idle_timeout 60s/30s），
-    // C++ 这边没人顺手做，所以挂一条定时器代它：不回收的话 34 个订阅源 × 2 条 SQLite
+    // C++ 这边没人顺手做，所以挂一条定时器代它：不回收的话 几十个订阅源 × 2 条 SQLite
     // 连接（每条 ~2MB 页缓存）会一直压在那儿。定时器是 AppContext 的子对象，随它一起没，
     // 所以回调里抓裸 Database* 是安全的；没有事件循环的场景（单元测试/探针）它不触发。
     Database *reapTarget = context->database_.get();

@@ -103,7 +103,7 @@ Status Database::updateNodeSpeedsBatch(const QVector<SpeedUpdate> &items)
             return Status::failed(pool.error());
         }
         // 只按候选 id 走主键点查：以前每个分库都 `SELECT id FROM nodes` 全量导出，
-        // 19000 条结果里绝大多数会被丢掉。
+        // 上万条结果里绝大多数会被丢掉。
         auto lease = pool.value()->acquire();
         QVector<const SpeedUpdate *> group;
         for (int offset = 0; offset < items.size(); offset += 500) {
