@@ -64,32 +64,56 @@ jobs:
 
       - name: Install the dependencies
         shell: bash
-        # msvc-dev-cmd leaves VCPKG_ROOT pointing at the vcpkg bundled with Visual Studio.
-        # A vcpkg.exe that disagrees with VCPKG_ROOT refuses to run at all (that is the
-        # 0-second failure this step had), so pin the variable to the tree we bootstrapped.
+        # msvc-dev-cmd leaves VCPKG_ROOT pointing at the vcpkg bundled with Visual Studio;
+        # a per-step env wins over what it wrote into $GITHUB_ENV.
         env:
           VCPKG_ROOT: ${{ env.VCC_VCPKG }}
         run: |
+          set +e
           "$VCC_VCPKG/vcpkg.exe" version
-          "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS
+          "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS > install.log 2>&1
+          status=$?
+          tail -n 40 install.log
+          # Job logs need repo admin rights; the annotation path is public, so quote the
+          # failure into it.
+          sh ci/annotate-fail.sh "$status" "vcpkg install" install.log
+          exit $status
 
       - name: Configure
         shell: bash
         run: |
+          set +e
           export VCPKG_ROOT="$VCC_VCPKG"
           cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
-            -DVCC_BUILD_TESTS=ON
+            -DVCC_BUILD_TESTS=ON > configure.log 2>&1
+          status=$?
+          tail -n 40 configure.log
+          sh ci/annotate-fail.sh "$status" "configure" configure.log
+          exit $status
 
       - name: Build everything
-        run: cmake --build build-ninja --parallel 8
+        shell: bash
+        run: |
+          set +e
+          cmake --build build-ninja --parallel 8 > build.log 2>&1
+          status=$?
+          tail -n 40 build.log
+          sh ci/annotate-fail.sh "$status" "build" build.log
+          exit $status
 
       - name: Run the test suites
         shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
           QT_PLUGIN_PATH: ${{ github.workspace }}/../vcpkg-ci/installed/x64-windows/debug/Qt6/plugins
-        run: ctest --test-dir build-ninja -j8 --output-on-failure
+        run: |
+          set +e
+          ctest --test-dir build-ninja -j8 --output-on-failure > tests.log 2>&1
+          status=$?
+          tail -n 60 tests.log
+          sh ci/annotate-fail.sh "$status" "ctest" tests.log
+          exit $status
 
       - name: Static guards (layer boundaries, single colour source)
         shell: bash
@@ -140,8 +164,13 @@ jobs:
         env:
           VCPKG_ROOT: ${{ env.VCC_VCPKG }}
         run: |
+          set +e
           "$VCC_VCPKG/vcpkg.exe" version
-          "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS
+          "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS > install.log 2>&1
+          status=$?
+          tail -n 40 install.log
+          sh ci/annotate-fail.sh "$status" "vcpkg install (installer job)" install.log
+          exit $status
 
       - name: Install Inno Setup
         shell: powershell
@@ -173,11 +202,18 @@ jobs:
       - name: Build Release, prune dist, compile the installer
         shell: bash
         run: |
+          set +e
           export VCPKG_ROOT="$VCC_VCPKG"
-          cmake -S . -B build-rel -G "Visual Studio 17 2022" -A x64 \
-            -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
-            -DVCC_BUILD_TESTS=OFF
-          node tools/package.mjs build-rel
+          {
+            cmake -S . -B build-rel -G "Visual Studio 17 2022" -A x64 \
+              -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
+              -DVCC_BUILD_TESTS=OFF
+            node tools/package.mjs build-rel
+          } > package.log 2>&1
+          status=$?
+          tail -n 40 package.log
+          sh ci/annotate-fail.sh "$status" "package" package.log
+          exit $status
 
       - uses: actions/upload-artifact@v4
         with:
