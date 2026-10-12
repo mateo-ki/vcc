@@ -1,8 +1,12 @@
 name: Build and Release
 
-# 触发：推 tag（v*）→ 建安装包并发布 GitHub Release；推 main / 手动 → 只编译 + 跑全部测试。
-# 第一次跑会从源码编 Qt6（几十分钟起步），vcpkg 的归档和已装树都进了 actions/cache，
-# 之后同一份 ci/vcpkg.json 基本是恢复缓存的速度。
+# Triggers: pushing a v* tag -> build the installer and publish a GitHub Release;
+# pushing to main (or a manual run) -> compile, run the gtest suites and the guards.
+#
+# Dependencies install in vcpkg's CLASSIC mode, the way the local tree does. CI's first two
+# failures were both manifest-mode paperwork - a manifest without builtin-baseline, then a
+# --depth 1 clone that did not contain the baseline commit - and neither is a property of
+# this project. Pinning the vcpkg *commit* keeps the run reproducible without any baseline.
 
 on:
   push:
@@ -13,15 +17,16 @@ on:
   workflow_dispatch:
 
 env:
-  # 故意不叫 VCPKG_ROOT：ilammy/msvc-dev-cmd 会把 VCPKG_ROOT 设成 VS 自带那份 vcpkg，
-  # 而 VS 带的 vcpkg 与本仓库的 baseline 无关，用它就会撞上 "requires a manifest with a
-  # specified baseline"（CI 第一次红就是这么来的）。自己的变量名没人覆盖。
+  # Named VCC_VCPKG on purpose: ilammy/msvc-dev-cmd exports VCPKG_ROOT pointing at the
+  # vcpkg bundled inside Visual Studio, which silently takes over from the tree we clone
+  # and cache here.
   VCC_VCPKG: ${{ github.workspace }}/../vcpkg-ci
-  # 编出来的包一律可重复获取：files 源在 jobs 之间靠 actions/cache 传。
+  VCC_VCPKG_SHA: e456309491fd875487bf02b8a0dca76c1b1b00cc
+  VCPKG_PORTS: libarchive nlohmann-json openssl qt6 unofficial-sqlite3 yaml-cpp zlib
   VCPKG_BINARY_SOURCES: files;${{ github.workspace }}/../vcpkg-cache;readwrite
 
 jobs:
-  # ------------------------------------------------------------------ 编译 + 全部测试
+  # ---------------------------------------------------------------- compile + full tests
   test:
     runs-on: windows-2022
     timeout-minutes: 360
@@ -34,25 +39,36 @@ jobs:
           path: |
             ${{ env.VCC_VCPKG }}
             ${{ github.workspace }}/../vcpkg-cache
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('ci/vcpkg.json') }}
-
-      - name: Bootstrap vcpkg
-        shell: bash
-        run: |
-          if [ ! -d "$VCC_VCPKG/scripts" ]; then
-            git clone --depth 1 https://github.com/microsoft/vcpkg "$VCC_VCPKG"
-          fi
-          "$VCC_VCPKG/bootstrap-vcpkg.bat" -disableMetrics
+          key: vcpkg-classic-${{ runner.os }}-${{ env.VCC_VCPKG_SHA }}-${{ env.VCPKG_PORTS }}
 
       - name: Set up MSVC + Ninja + CMake on PATH
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Configure and install the dependencies
+      - name: Bootstrap vcpkg at the pinned commit
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          if [ ! -d "$VCC_VCPKG/.git" ]; then git clone https://github.com/microsoft/vcpkg "$VCC_VCPKG"; fi
+          # Classic mode needs no baseline, so the pin is a nice-to-have: if the cached
+          # clone cannot fetch that exact object, fall back to the tip instead of failing
+          # the whole job over it.
+          if git -C "$VCC_VCPKG" fetch --depth 1 origin "$VCC_VCPKG_SHA"; then
+            git -C "$VCC_VCPKG" checkout --detach "$VCC_VCPKG_SHA"
+          else
+            echo "::warning::could not fetch vcpkg $VCC_VCPKG_SHA - continuing on the branch tip"
+          fi
+          "$VCC_VCPKG/bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Install the dependencies
+        shell: bash
+        run: "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS
+
+      - name: Configure
         shell: bash
         run: |
           cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE/ci" -DVCC_BUILD_TESTS=ON
+            -DVCC_BUILD_TESTS=ON
 
       - name: Build everything
         run: cmake --build build-ninja --parallel 8
@@ -70,7 +86,7 @@ jobs:
           node tools/check-decoupling.mjs
           node tools/check-hardcoded-colors.mjs
 
-  # ------------------------------------------------------------------ 安装包 + Release
+  # ---------------------------------------------------------------- installer + release
   installer:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
@@ -84,15 +100,7 @@ jobs:
           path: |
             ${{ env.VCC_VCPKG }}
             ${{ github.workspace }}/../vcpkg-cache
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('ci/vcpkg.json') }}
-
-      - name: Bootstrap vcpkg
-        shell: bash
-        run: |
-          if [ ! -d "$VCC_VCPKG/scripts" ]; then
-            git clone --depth 1 https://github.com/microsoft/vcpkg "$VCC_VCPKG"
-          fi
-          "$VCC_VCPKG/bootstrap-vcpkg.bat" -disableMetrics
+          key: vcpkg-classic-${{ runner.os }}-${{ env.VCC_VCPKG_SHA }}-${{ env.VCPKG_PORTS }}
 
       - uses: actions/setup-node@v4
         with:
@@ -100,6 +108,25 @@ jobs:
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Bootstrap vcpkg at the pinned commit
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          if [ ! -d "$VCC_VCPKG/.git" ]; then git clone https://github.com/microsoft/vcpkg "$VCC_VCPKG"; fi
+          # Classic mode needs no baseline, so the pin is a nice-to-have: if the cached
+          # clone cannot fetch that exact object, fall back to the tip instead of failing
+          # the whole job over it.
+          if git -C "$VCC_VCPKG" fetch --depth 1 origin "$VCC_VCPKG_SHA"; then
+            git -C "$VCC_VCPKG" checkout --detach "$VCC_VCPKG_SHA"
+          else
+            echo "::warning::could not fetch vcpkg $VCC_VCPKG_SHA - continuing on the branch tip"
+          fi
+          "$VCC_VCPKG/bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Install the dependencies
+        shell: bash
+        run: "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS
 
       - name: Install Inno Setup
         shell: powershell
@@ -115,7 +142,7 @@ jobs:
               exit 0
             fi
           done
-          echo "::error::装了 Inno Setup 还是找不到 ISCC.exe"
+          echo "::error::Inno Setup installed but ISCC.exe is still nowhere to be found"
           exit 1
 
       - name: The tag must match the version baked into the installer
@@ -124,7 +151,7 @@ jobs:
           want="${GITHUB_REF_NAME#v}"
           have="$(grep -oE '#define +MyAppVersion +"[^"]+"' cmake/vcc.iss | sed -E 's/.*"([^"]+)".*/\1/')"
           if [ "$want" != "$have" ]; then
-            echo "::error::tag 是 v$want，但 cmake/vcc.iss 里 MyAppVersion 是 $have"
+            echo "::error::tag is v$want but MyAppVersion in cmake/vcc.iss is $have"
             exit 1
           fi
 
@@ -133,7 +160,7 @@ jobs:
         run: |
           cmake -S . -B build-rel -G "Visual Studio 17 2022" -A x64 \
             -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE/ci" -DVCC_BUILD_TESTS=OFF
+            -DVCC_BUILD_TESTS=OFF
           node tools/package.mjs build-rel
 
       - uses: actions/upload-artifact@v4

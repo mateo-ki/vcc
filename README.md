@@ -80,7 +80,7 @@ node tools/selftest-decoupling-guard.mjs # 反向验：把六条规则逐个弄�
 | OpenSSL | TLS 握手测速 |
 | nlohmann_json、zlib | JSON 与压缩 |
 
-依赖用 vcpkg **经典模式**安装（仓库根目录故意不放 `vcpkg.json`：manifest 模式会重新解析依赖图、把 Qt 整个从源码重编一遍）。CI 需要 manifest，所以那份清单放在 `ci/vcpkg.json`，由 `-DVCPKG_MANIFEST_DIR` 显式指过去，本地照旧用经典树。
+依赖用 vcpkg **经典模式**安装（仓库根目录故意不放 `vcpkg.json`：manifest 模式会重新解析依赖图、把 Qt 整个从源码重编一遍）。CI 也走经典模式并固定 vcpkg 的 commit —— 可复现靠"钉住 commit"，不需要 manifest 的 `builtin-baseline`。
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
@@ -111,7 +111,8 @@ node tools/package.mjs build-rel
 - 推 `main` 或手动触发 → 装依赖、编译、跑 40 个套件、跑两条静态守卫（分层解耦、颜色单一来源）。
 - 推 `v*` 的 tag → 上面全过之后再出安装包，并把 `build-rel/installer/*.exe` 发成一个 GitHub Release。
 - 版本号只写在一个地方：`cmake/vcc.iss` 的 `#define MyAppVersion`。tag 与它不一致时工作流会直接失败，而不是发出一个名字和内容不符的包。
-- 首次运行会从源码编 Qt6/OpenSSL（很慢，job 上限 6 小时）；vcpkg 的安装树与归档都进了 `actions/cache`，key 跟着 `ci/vcpkg.json` 走，之后是恢复缓存的速度。
+- 首次运行会从源码编 Qt6/OpenSSL（很慢，job 上限 6 小时）；vcpkg 的安装树与归档都进了 `actions/cache`，key 跟着"用的 vcpkg commit + 依赖清单"走，之后是恢复缓存的速度。
+- CI 用 vcpkg 的**经典模式**（和本机一致），并把 vcpkg 固定在 `e456309491fd875487bf02b8a0dca76c1b1b00cc`：可复现靠固定 commit，而不是靠 manifest 的 `builtin-baseline`。
 
 ```bash
 # 发版
