@@ -61,7 +61,7 @@ jobs:
 
       - name: Install the dependencies
         shell: bash
-        run: "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS
+        run: '"$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS'
 
       - name: Configure
         shell: bash
@@ -126,7 +126,7 @@ jobs:
 
       - name: Install the dependencies
         shell: bash
-        run: "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS
+        run: '"$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS'
 
       - name: Install Inno Setup
         shell: powershell
