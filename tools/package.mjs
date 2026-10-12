@@ -10,8 +10,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const dir = process.argv[2] ?? 'build-rel';
-const ISCC = 'D:/software/InnoSetup6/ISCC.exe';
+// Inno 的命令行编译器：本地默认那个位置，CI 上设 ISCC=C:\Program Files (x64)\Inno Setup 6\ISCC.exe
+const ISCC = process.env.ISCC ?? 'D:/software/InnoSetup6/ISCC.exe';
 const started = Date.now();
+
+// 安装包文件名从 .iss 里的 #define 现取，别在这里再抄一份版本号（改版本只动一个地方）。
+function installerName() {
+    const iss = fs.readFileSync('cmake/vcc.iss', 'utf8');
+    const version = iss.match(/#define\s+MyAppVersion\s+"([^"]+)"/)?.[1] ?? '0.0.0';
+    const base = iss.match(/#define\s+OutputBaseFilename\s+([^\r\n]+)/)?.[1].trim()
+        .replace('{#MyAppVersion}', version) ?? `VCC-${version}-win64`;
+    return `${base}.exe`;
+}
 
 function run(label, cmd, args) {
     const t0 = Date.now();
@@ -36,7 +46,7 @@ run('编译 vcc（只它 + 依赖的 lib，不碰测试目标）', 'cmake',
 run('裁剪 dist', process.execPath, ['tools/make-dist.mjs', dir]);
 run('编译安装包', ISCC, ['cmake/vcc.iss']);
 
-const pkg = path.join(dir, 'installer', 'VCC-1.0.0-win64.exe');
+const pkg = path.join(dir, 'installer', installerName());
 const info = fs.statSync(pkg);
 console.log(`\n总计 ${((Date.now() - started) / 1000).toFixed(1)}s`);
 console.log(`安装包: ${pkg}  ${(info.size / 1048576).toFixed(1)}MB  ${info.mtime.toLocaleString()}`);

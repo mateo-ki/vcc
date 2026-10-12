@@ -80,7 +80,7 @@ node tools/selftest-decoupling-guard.mjs # 反向验：把六条规则逐个弄�
 | OpenSSL | TLS 握手测速 |
 | nlohmann_json、zlib | JSON 与压缩 |
 
-依赖用 vcpkg **经典模式**安装（仓库里故意不放 `vcpkg.json`：manifest 模式会重新解析依赖图、把 Qt 整个从源码重编一遍）。
+依赖用 vcpkg **经典模式**安装（仓库根目录故意不放 `vcpkg.json`：manifest 模式会重新解析依赖图、把 Qt 整个从源码重编一遍）。CI 需要 manifest，所以那份清单放在 `ci/vcpkg.json`，由 `-DVCPKG_MANIFEST_DIR` 显式指过去，本地照旧用经典树。
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
@@ -99,6 +99,23 @@ ctest --test-dir build -C Debug
 
 ```bash
 node tools/package.mjs build-rel
+```
+
+脚本里两个外部工具都可以用环境变量指路，不设就用本机的默认位置：
+`ISCC`（Inno Setup 的命令行编译器）、`OBJDUMP`（`make-dist` 用它做依赖闭包自查，缺了就跳过那一步）。
+
+### CI 与发版
+
+`.github/workflows/build.yml`：
+
+- 推 `main` 或手动触发 → 装依赖、编译、跑 40 个套件、跑两条静态守卫（分层解耦、颜色单一来源）。
+- 推 `v*` 的 tag → 上面全过之后再出安装包，并把 `build-rel/installer/*.exe` 发成一个 GitHub Release。
+- 版本号只写在一个地方：`cmake/vcc.iss` 的 `#define MyAppVersion`。tag 与它不一致时工作流会直接失败，而不是发出一个名字和内容不符的包。
+- 首次运行会从源码编 Qt6/OpenSSL（很慢，job 上限 6 小时）；vcpkg 的安装树与归档都进了 `actions/cache`，key 跟着 `ci/vcpkg.json` 走，之后是恢复缓存的速度。
+
+```bash
+# 发版
+git tag v1.0.0 && git push origin v1.0.0     # 安装包由 CI 产出
 ```
 
 ## 运行

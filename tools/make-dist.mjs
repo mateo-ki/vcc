@@ -80,7 +80,7 @@ for (const category of KEEP_PLUGIN_DIRS) {
 note('platforms/ 重复那份', dirSize(path.join(src, 'platforms')));
 
 // 3) 依赖闭包自查：包里有没有引用了却没带的 DLL
-const OBJDUMP = 'D:/software/msys64/mingw64/bin/objdump.exe';
+const OBJDUMP = process.env.OBJDUMP ?? 'D:/software/msys64/mingw64/bin/objdump.exe';
 const systemDlls = /^(api-ms-win-|ext-ms-win-|xmllite|d3d9|d3d12|dwrite|wininet|uiautomationcore|authz|kernel32|user32|gdi32|ole32|oleaut32|shell32|advapi32|ws2_32|winmm|comdlg32|setupapi|crypt32|bcrypt|version|imm32|dwmapi|uxtheme|secur32|ncrypt|wtsapi32|iphlpapi|userenv|pdh|psapi|rpcrt4|shlwapi|wintrust|winhttp|msvcrt|vcruntime140|vcruntime140_1|msvcp140|msvcp140_1|msvcp140_2|ucrtbase|nlaapi|wlanapi|dbghelp|qdpi|d3d11|dxgi|ddraw|dsound|hid|ksuser|avifil32|avicap32|msvfw32|glu32|opengl32|winmmbase|mpr|netapi32|samcli|sehdinst|suhd|devobj|cfgmgr32|wldclient|fwpuclnt|rasapi32|dnsapi|wevtapi|winspool|msimg32|comctl32|gdiplus|windowscodecs|propsys|objects|shcore|bcp47|phpivot|kernel.appcore|apppolicylicense|rt_workqueue|ntdll|sechost|profapi|powrprof|msacm32|resutils|synchronization|resourcepolicy|fibonacci)/i;
 const missing = new Set();
 if (fs.existsSync(OBJDUMP)) {

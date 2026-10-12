@@ -1,0 +1,144 @@
+name: Build and Release
+
+# 触发：推 tag（v*）→ 建安装包并发布 GitHub Release；推 main / 手动 → 只编译 + 跑全部测试。
+# 第一次跑会从源码编 Qt6（几十分钟起步），vcpkg 的归档和已装树都进了 actions/cache，
+# 之后同一份 ci/vcpkg.json 基本是恢复缓存的速度。
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  VCPKG_ROOT: ${{ github.workspace }}/../vcpkg
+  # 编出来的包一律可重复下载：files 源在 jobs 之间靠 actions/cache 传。
+  VCPKG_BINARY_SOURCES: files;${{ github.workspace }}/../vcpkg-cache;readwrite
+
+jobs:
+  # ------------------------------------------------------------------ 编译 + 全部测试
+  test:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the vcpkg tree and its archives
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.VCPKG_ROOT }}
+            ${{ github.workspace }}/../vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('ci/vcpkg.json') }}
+
+      - name: Bootstrap vcpkg
+        shell: bash
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT" || true
+          "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Set up MSVC + Ninja + CMake on PATH
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure and install the dependencies
+        shell: bash
+        run: |
+          cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE/ci" -DVCC_BUILD_TESTS=ON
+
+      - name: Build everything
+        run: cmake --build build-ninja --parallel 8
+
+      - name: Run the test suites
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_PLUGIN_PATH: ${{ github.workspace }}/../vcpkg/installed/x64-windows/debug/Qt6/plugins
+        run: ctest --test-dir build-ninja -j8 --output-on-failure
+
+      - name: Static guards (layer boundaries, single colour source)
+        shell: bash
+        run: |
+          node tools/check-decoupling.mjs
+          node tools/check-hardcoded-colors.mjs
+
+  # ------------------------------------------------------------------ 安装包 + Release
+  installer:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.VCPKG_ROOT }}
+            ${{ github.workspace }}/../vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('ci/vcpkg.json') }}
+
+      - name: Bootstrap vcpkg
+        shell: bash
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT" || true
+          "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+
+      - name: Locate ISCC
+        shell: bash
+        run: |
+          for candidate in "/c/Program Files (x64)/Inno Setup 6/ISCC.exe" \
+                           "/c/Program Files/Inno Setup 6/ISCC.exe"; do
+            if [ -f "$candidate" ]; then
+              echo "ISCC=$(cygpath -w "$candidate")" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "::error::装了 Inno Setup 还是找不到 ISCC.exe"
+          exit 1
+
+      - name: The tag must match the version baked into the installer
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have="$(grep -oE '#define +MyAppVersion +"[^"]+"' cmake/vcc.iss | sed -E 's/.*"([^"]+)".*/\1/')"
+          if [ "$want" != "$have" ]; then
+            echo "::error::tag 是 v$want，但 cmake/vcc.iss 里 MyAppVersion 是 $have"
+            exit 1
+          fi
+
+      - name: Build Release, prune dist, compile the installer
+        shell: bash
+        run: |
+          cmake -S . -B build-rel -G "Visual Studio 17 2022" -A x64 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE/ci" -DVCC_BUILD_TESTS=OFF
+          node tools/package.mjs build-rel
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vcc-windows-installer
+          path: build-rel/installer/*.exe
+          if-no-files-found: error
+
+      - name: Publish the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build-rel/installer/*.exe \
+            --verify-tag --title "VCC $GITHUB_REF_NAME" --generate-notes
