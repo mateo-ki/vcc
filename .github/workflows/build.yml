@@ -26,7 +26,10 @@ env:
   # exist"). The Qt6 modules this project finds are split ports: qtbase carries
   # Core/Gui/Widgets/Network/Concurrent, qtsvg carries Svg.
   VCPKG_PORTS: qtbase qtsvg libarchive nlohmann-json openssl sqlite3 yaml-cpp zlib
-  VCPKG_BINARY_SOURCES: files;${{ github.workspace }}/../vcpkg-cache;readwrite
+  # Binary cache: sources are separated by ';', the fields *inside* one source by ','.
+  # Writing `files;<path>;readwrite` makes vcpkg read "readwrite" as the path and fail the
+  # whole install step with "binary config 'files' requires at least one path argument".
+  VCPKG_BINARY_SOURCES: files,${{ github.workspace }}/../vcpkg-cache,readwrite
 
 jobs:
   # ---------------------------------------------------------------- compile + full tests
@@ -120,6 +123,20 @@ jobs:
         run: |
           node tools/check-decoupling.mjs
           node tools/check-hardcoded-colors.mjs
+
+      # Job logs need repository rights to download, so keep the per-step logs as an
+      # artifact too - the annotation only carries the tail.
+      - name: Attach the step logs
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-job-logs
+          path: |
+            install.log
+            configure.log
+            build.log
+            tests.log
 
   # ---------------------------------------------------------------- installer + release
   installer:
@@ -228,3 +245,13 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" build-rel/installer/*.exe \
             --verify-tag --title "VCC $GITHUB_REF_NAME" --generate-notes
+
+      - name: Attach the step logs
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-job-logs
+          path: |
+            install.log
+            package.log
