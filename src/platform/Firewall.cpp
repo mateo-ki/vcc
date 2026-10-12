@@ -67,7 +67,7 @@ Result<QString> canonicalizePath(const QString &path)
 
 QString rulePrefix()
 {
-    return QStringLiteral("VPN Parser");
+    return QStringLiteral("VCC");
 }
 
 QString ruleName(const QString &programPath)

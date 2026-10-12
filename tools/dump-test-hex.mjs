@@ -3,7 +3,7 @@ import fs from 'node:fs';
 // Scratch helper used while writing the probe tests: prints the non-ASCII segments of
 // every user-visible literal in proxy_probe.rs (plus the sing-box / xray probe texts) as
 // UTF-8 hex, so the tests can spell expectations in pure ASCII.
-//   node src/proxy_probe/dump-test-hex.mjs
+//   node tools/dump-test-hex.mjs
 const RUST = 'D:/project/rust/vs/vpn-parser/src';
 
 const wanted = [

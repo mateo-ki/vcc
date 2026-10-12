@@ -60,10 +60,21 @@ bool skipsWindowClass(const QString &className)
     return className != trayWindowClass();
 }
 
+
 bool windowIsAlreadyShown(bool visible, bool iconic)
 {
     // `IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0` → "本来就看得见，别碰"。
     return visible && !iconic;
+}
+
+bool windowIsAppWindow(bool hasCaption, bool toolWindow, bool noActivate)
+{
+    // Qt 每个进程都带几条隐藏的辅助顶层窗口（ThemeChangeObserver / ScreenChangeObserver /
+    // IME / MSCTFIME UI），它们没有标题栏、尺寸是 0。Rust/winit 那边进程内只有主窗口和托盘
+    // 隐藏窗，所以 `class != TRAY_WINDOW_CLASS` 就够了；照抄到 Qt 上就会对这些辅助窗口
+    // ShowWindow(SW_SHOW)+HWND_TOPMOST —— 屏幕上凭空多出几个白色空框，要等 Qt 自己把它们
+    // 收回去才消失（2026-10-12 他报的"两个白窗口卡住"，日志里就是那四条 class 名）。
+    return hasCaption && !toolWindow && !noActivate;
 }
 
 #ifdef Q_OS_WIN
@@ -80,7 +91,12 @@ BOOL CALLBACK restoreEnumProc(HWND hwnd, LPARAM lparam)
     // （2026-10-05 实测：左键一次之后该线程不再取任何消息，托盘左/右键全无反应）。
     if (pid == currentPid && windowThread == GetCurrentThreadId()) {
         const QString className = windowClassName(hwnd);
-        if (skipsWindowClass(className)) {
+        const LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+        const LONG exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        if (skipsWindowClass(className)
+            && windowIsAppWindow((style & WS_CAPTION) == WS_CAPTION,
+                                 (exStyle & WS_EX_TOOLWINDOW) != 0,
+                                 (exStyle & WS_EX_NOACTIVATE) != 0)) {
             Log::startup(QStringLiteral("restore_main_window_native restoring hwnd=%1, class=%2")
                              .arg(hwndText(hwnd), className));
             ShowWindow(hwnd, SW_SHOW);
@@ -162,6 +178,7 @@ BOOL CALLBACK trayToolbarEnumProc(HWND hwnd, LPARAM)
 }
 
 } // namespace
+
 
 void restoreMainWindowNative()
 {

@@ -6,6 +6,8 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QSslConfiguration>
+#include <QSslError>
 #include <QTimer>
 
 namespace Net {
@@ -76,13 +78,14 @@ Result<Response> send(const Request &request)
     QNetworkProxy proxy;
     bool hasProxy = false;
     QNetworkRequest netRequest{QUrl(request.url)};
+    QSslConfiguration sslConfig = netRequest.sslConfiguration();
+    sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+    netRequest.setSslConfiguration(sslConfig);
+    netRequest.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     // reqwest 默认跟随重定向并拒绝"https→http"降级；NoLessSafeRedirectPolicy 是同一套规则。
     netRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                             QNetworkRequest::NoLessSafeRedirectPolicy);
     netRequest.setMaximumRedirectsAllowed(request.maxRedirects);
-    if (request.connectTimeoutMs > 0) {
-        // Qt 6.10 没有连接超时属性，只能靠下面的整体时限兜住。
-    }
     if (!request.proxyUrl.isEmpty()) {
         QUrl proxyUrl = QUrl(request.proxyUrl);
         if (proxyUrl.scheme().isEmpty()) {
@@ -98,6 +101,11 @@ Result<Response> send(const Request &request)
     }
     if (hasProxy) {
         manager.setProxy(proxy);
+    } else {
+        manager.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+    }
+    if (!netRequest.hasRawHeader("Accept")) {
+        netRequest.setRawHeader("Accept", "*/*");
     }
     if (!request.contentType.isEmpty()) {
         netRequest.setHeader(QNetworkRequest::ContentTypeHeader, request.contentType);
@@ -111,13 +119,27 @@ Result<Response> send(const Request &request)
     if (!request.ifModifiedSince.isEmpty()) {
         netRequest.setRawHeader("If-Modified-Since", request.ifModifiedSince.toUtf8());
     }
+    // reqwest 只有在 builder 里显式设了 UA 才发这个头，没设就一个都不发；这里不能自己
+    // 编一个默认值，否则"不带 UA"的调用方（IpRisk 探针）发出去的就不是它要的请求。
     if (!request.userAgent.isEmpty()) {
         netRequest.setRawHeader("User-Agent", request.userAgent.toUtf8());
     }
 
     reply = manager.sendCustomRequest(netRequest, request.method, request.body);
+    reply->ignoreSslErrors();
+    QObject::connect(reply, &QNetworkReply::sslErrors, reply, [reply](const QList<QSslError> &) {
+        reply->ignoreSslErrors();
+    });
     QPointer<QNetworkReply> guard(reply);
     bool timedOut = false;
+    bool headerTimedOut = false;
+    bool connectTimedOut = false;
+    bool cancelledByCaller = false;
+    bool bodyIdleTimedOut = false;
+    bool headersSeen = false;
+    bool linkUp = false;
+    qint64 receivedBytes = 0;
+
     QTimer timer;
     timer.setSingleShot(true);
     QObject::connect(&timer, &QTimer::timeout, [&]() {
@@ -128,6 +150,98 @@ Result<Response> send(const Request &request)
     });
     timer.start(request.timeoutMs);
 
+    // 响应头预算：到点就断，等价于 Rust 只给 `send()`（拿到头为止）的那段 timeout。
+    QTimer headerTimer;
+    headerTimer.setSingleShot(true);
+    QObject::connect(&headerTimer, &QTimer::timeout, [&]() {
+        headerTimedOut = true;
+        if (guard) {
+            guard->abort();
+        }
+    });
+    if (request.headerTimeoutMs > 0) {
+        headerTimer.start(request.headerTimeoutMs);
+    }
+
+    // 连接预算：对应 Rust 的 `Client::connect_timeout`（只管 DNS+TCP+TLS 建连那一段）。
+    // 没有它时一个连不上的镜像要烧掉调用方的全部时限（geo 是 180s；实测 12s 预算也只会在
+    // 12s 才回），而 Rust 6s 就放手。
+    // Qt 6.10 既没有连接超时属性，也没有 QNetworkAccessManager::connected 信号，所以只能拿
+    // "能证明链路已经活着"的最早信号停表：HTTPS 用 reply->encrypted（TLS 握手完成，正是
+    // reqwest 放手的那一刻），响应头/进度/重定向兜底。表一停就不再管这一段，所以
+    // "连上了但 8s 才回头"的服务器不会被误杀 —— 那归响应头预算和整体时限管。
+    // **只对 https 生效**：明文 http 在 Qt 里没有任何"连接已建立"信号，硬撑这道预算会把
+    // "接了连接、一个字都不回"的正常服务器误判成连不上（Rust 那边它 connect_timeout 早就
+    // 过了，等的是响应头预算）。这类对端仍由 headerTimeoutMs / timeoutMs 管。
+    QTimer connectTimer;
+    connectTimer.setSingleShot(true);
+    QObject::connect(&connectTimer, &QTimer::timeout, [&]() {
+        if (linkUp) {
+            return;
+        }
+        connectTimedOut = true;
+        if (guard) {
+            guard->abort();
+        }
+    });
+    auto markLinkUp = [&]() {
+        linkUp = true;
+        connectTimer.stop();
+    };
+    QObject::connect(reply, &QNetworkReply::encrypted, &connectTimer, markLinkUp);
+    QObject::connect(reply, &QNetworkReply::redirected, &connectTimer, markLinkUp);
+    QObject::connect(reply, &QNetworkReply::uploadProgress, &connectTimer, markLinkUp);
+    QObject::connect(reply, &QNetworkReply::downloadProgress, &connectTimer, markLinkUp);
+    QObject::connect(reply, &QNetworkReply::metaDataChanged, &connectTimer, markLinkUp);
+    if (request.connectTimeoutMs > 0 && netRequest.url().scheme() == QLatin1String("https")) {
+        connectTimer.start(request.connectTimeoutMs);
+    }
+
+    // 取消轮询：调用方（竞速里的赢家）在别的线程上把标志一置，这里最多 40ms 后
+    // 自己 abort。只有 reply 的所有线程碰 reply，所以跨线程传的只是一个原子标志。
+    QTimer cancelPoll;
+    cancelPoll.setInterval(40);
+    QObject::connect(&cancelPoll, &QTimer::timeout, [&]() {
+        if (request.cancel == nullptr || !request.cancel->isCancelled()) {
+            return;
+        }
+        cancelledByCaller = true;
+        cancelPoll.stop();
+        if (guard) {
+            guard->abort();
+        }
+    });
+    if (request.cancel != nullptr) {
+        cancelPoll.start();
+    }
+
+    // 读体阶段的块间空闲预算，每收到一块就重置。用 downloadProgress 而不是 readyRead：
+    // 这里不中途 readAll，Qt 会把数据攒在缓冲里，readyRead 不一定逐块来。
+    QTimer idleTimer;
+    idleTimer.setSingleShot(true);
+    QObject::connect(&idleTimer, &QTimer::timeout, [&]() {
+        bodyIdleTimedOut = true;
+        if (guard) {
+            guard->abort();
+        }
+    });
+    QObject::connect(reply, &QNetworkReply::metaDataChanged, [&]() {
+        if (headersSeen) {
+            return;
+        }
+        headersSeen = true;
+        headerTimer.stop();
+        if (request.bodyIdleTimeoutMs > 0) {
+            idleTimer.start(request.bodyIdleTimeoutMs);
+        }
+    });
+    QObject::connect(reply, &QNetworkReply::downloadProgress, [&](qint64 bytesReceived, qint64) {
+        receivedBytes = bytesReceived;
+        if (headersSeen && request.bodyIdleTimeoutMs > 0) {
+            idleTimer.start(request.bodyIdleTimeoutMs);
+        }
+    });
+
     QEventLoop loop;
     QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
     if (reply->isFinished()) {
@@ -135,6 +249,37 @@ Result<Response> send(const Request &request)
     }
     loop.exec();
     timer.stop();
+    headerTimer.stop();
+    connectTimer.stop();
+    cancelPoll.stop();
+    idleTimer.stop();
+
+    if (cancelledByCaller) {
+        reply->deleteLater();
+        // 必须排在其它判定之前：取消会让 Qt 自己报 OperationCanceled/超时一类错误，
+        // 但那不是"请求失败"，是有人主动让它放手，调用方要能分清这两种。
+        return Result<Response>::withError(cancelledError());
+    }
+    if (connectTimedOut) {
+        reply->deleteLater();
+        // 和 Qt 自己把 TimeoutError 翻出来的那句同一个串：Collector 已经按 Rust 的
+        // is_connect() 分支认它（Collector.cpp:443），这里不能另造一个新哨兵。
+        return Result<Response>::withError(QStringLiteral("连接超时"));
+    }
+    if (headerTimedOut) {
+        reply->deleteLater();
+        // 调用方按 Rust 的 Elapsed 分支拼"响应头超时: Ns"，这里只给判定用的哨兵。
+        return Result<Response>::withError(QStringLiteral("响应头超时"));
+    }
+    if (bodyIdleTimedOut) {
+        reply->deleteLater();
+        // 逐字对齐 Rust 的 read_source_body 超时文本（mod.rs:759-765）。
+        return Result<Response>::withError(
+            QStringLiteral("response body idle for %1s after %2 bytes (overall limit %3s)")
+                .arg(request.bodyIdleTimeoutMs / 1000)
+                .arg(receivedBytes)
+                .arg(request.timeoutMs / 1000));
+    }
 
     Response response;
     response.finalUrl = reply->url().toString();

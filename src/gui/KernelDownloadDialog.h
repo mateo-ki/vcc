@@ -26,6 +26,9 @@ public:
     Kernel::Source selectedSource() const;
     QString localFilePath() const;
 
+protected:
+    bool eventFilter(QObject *obj, QEvent *ev) override;
+
 private:
     void updateUiState();
 

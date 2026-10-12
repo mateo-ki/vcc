@@ -96,6 +96,7 @@ Json AppSettings::toJson() const
     value["kernel_source"] = kernelSource.toStdString();
     value["firewall_auto_allow"] = firewallAutoAllow;
     value["auto_failover"] = autoFailover;
+    value["failover_probe_urls"] = failoverProbeUrls.toStdString();
     value["speedtest_auto_refill"] = speedtestAutoRefill;
     value["auto_prepare_kernel"] = autoPrepareKernel;
     value["speedtest_added_source"] = speedtestAddedSource;
@@ -138,6 +139,7 @@ AppSettings AppSettings::fromJson(const Json &value)
     settings.kernelSource = source.isEmpty() ? QString::fromLatin1(kDefaultKernelSource) : source;
     settings.firewallAutoAllow = JsonUtil::boolOr(value, "firewall_auto_allow", false);
     settings.autoFailover = JsonUtil::boolOr(value, "auto_failover", false);
+    settings.failoverProbeUrls = JsonUtil::textOrEmpty(value, "failover_probe_urls");
     settings.speedtestAutoRefill = JsonUtil::boolOr(value, "speedtest_auto_refill", false);
     settings.autoPrepareKernel = JsonUtil::boolOr(value, "auto_prepare_kernel", true);
     settings.speedtestAddedSource = JsonUtil::boolOr(value, "speedtest_added_source", true);
@@ -177,6 +179,7 @@ UpdateSettings UpdateSettings::fromJson(const Json &value)
     update.kernelSource = optTextValue(value, "kernel_source");
     update.firewallAutoAllow = optBool(value, "firewall_auto_allow");
     update.autoFailover = optBool(value, "auto_failover");
+    update.failoverProbeUrls = optTextValue(value, "failover_probe_urls");
     update.speedtestAutoRefill = optBool(value, "speedtest_auto_refill");
     update.autoPrepareKernel = optBool(value, "auto_prepare_kernel");
     update.speedtestAddedSource = optBool(value, "speedtest_added_source");
@@ -211,6 +214,7 @@ void UpdateSettings::applyTo(AppSettings &target) const
     applyText(kernelSource, target.kernelSource);
     applyBool(firewallAutoAllow, target.firewallAutoAllow);
     applyBool(autoFailover, target.autoFailover);
+    applyText(failoverProbeUrls, target.failoverProbeUrls);
     applyBool(speedtestAutoRefill, target.speedtestAutoRefill);
     applyBool(autoPrepareKernel, target.autoPrepareKernel);
     applyBool(speedtestAddedSource, target.speedtestAddedSource);
@@ -245,6 +249,7 @@ Json UpdateSettings::toJson() const
     value["kernel_source"] = optionalText(kernelSource);
     value["firewall_auto_allow"] = optionalBool(firewallAutoAllow);
     value["auto_failover"] = optionalBool(autoFailover);
+    value["failover_probe_urls"] = optionalText(failoverProbeUrls);
     value["speedtest_auto_refill"] = optionalBool(speedtestAutoRefill);
     value["auto_prepare_kernel"] = optionalBool(autoPrepareKernel);
     value["speedtest_added_source"] = optionalBool(speedtestAddedSource);

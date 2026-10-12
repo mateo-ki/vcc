@@ -22,7 +22,7 @@
 #include "proxy_probe/ProbeMessages.h"
 #include "proxy_probe/ProbeTypes.h"
 #include "proxy_probe/SingBoxProbe.h"
-#include "proxy_probe/TestUrls.h"
+#include "proxy/TestUrls.h"
 #include "proxy_probe/XrayProbe.h"
 
 using namespace ProxyProbe;
@@ -288,7 +288,12 @@ TEST(ProbeJoinWindow, CapsInFlightTasks)
     const auto job = [&started, &gate, &running, &peak](int id) {
         return [id, &started, &gate, &running, &peak]() {
             const int now = ++running;
-            peak.store(std::max<int>(peak.load(), now));
+            // fetch_max 而不是 store(max(load(), now))：后者两个线程会互相覆盖
+            // （A 读到 0 算出 1、B 读到 1 算出 2，A 后写就把 peak 打回 1），
+            // 表现是这条用例偶发红在 EXPECT_EQ(peak, 2)。
+            int best = peak.load(std::memory_order_relaxed);
+            while (now > best && !peak.compare_exchange_weak(best, now, std::memory_order_relaxed)) {
+            }
             started.release(1);
             gate.acquire(1);
             --running;

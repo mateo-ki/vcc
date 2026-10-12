@@ -434,8 +434,8 @@ bool isOrphanProxyCoreImage(const QString &imageName)
 
 bool isDuplicateAppImage(const QString &imageName)
 {
-    // Rust 比较的是 "vpn-parser.exe"（产品可执行文件名，安装版与绿色版同名）。
-    return imageName.toLower() == QLatin1String("vpn-parser.exe");
+    const QString lowered = imageName.toLower();
+    return lowered == QLatin1String("vcc.exe") || lowered == QLatin1String("vpn-parser.exe");
 }
 
 JobObjectGuard::~JobObjectGuard()

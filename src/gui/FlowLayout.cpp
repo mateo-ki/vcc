@@ -108,21 +108,48 @@ QRect FlowLayout::doLayout(const QRect &rect, bool testOnly) const
     const int hSpace = horizontalSpacing();
     const int vSpace = verticalSpacing();
 
+    struct LineEntry {
+        QLayoutItem *item;
+        int x;
+        int w;
+        int h;
+    };
+    QVector<LineEntry> lineItems;
+
+    auto flushLine = [&](int lineY, int lineH) {
+        if (!testOnly) {
+            for (const auto &entry : lineItems) {
+                // 垂直居中对齐：使行内的文字标签与按钮药丸沿中轴对齐
+                const int itemY = lineY + (lineH - entry.h) / 2;
+                entry.item->setGeometry(QRect(entry.x, itemY, entry.w, entry.h));
+            }
+        }
+        lineItems.clear();
+    };
+
     for (QLayoutItem *item : items_) {
-        const int nextX = x + item->sizeHint().width() + hSpace;
-        if (lineHeight > 0 && nextX - hSpace > effective.right() + 1 && lineHeight > 0) {
+        const QSize hint = item->sizeHint();
+        const int itemW = hint.width();
+        const int itemH = hint.height();
+        const int nextX = x + itemW + hSpace;
+
+        if (lineHeight > 0 && nextX - hSpace > effective.right() + 1) {
+            flushLine(y, lineHeight);
             x = effective.x();
             y += lineHeight + vSpace;
-            lineHeight = item->sizeHint().height();
+            lineHeight = itemH;
         } else {
-            // 第一个控件也要把行高立起来，否则整行高度按 0 算。
-            lineHeight = std::max(lineHeight, item->sizeHint().height());
+            lineHeight = std::max(lineHeight, itemH);
         }
-        if (!testOnly) {
-            item->setGeometry(QRect(QPoint(x, y), item->sizeHint()));
-        }
-        x = nextX;
+
+        lineItems.push_back({item, x, itemW, itemH});
+        x += itemW + hSpace;
     }
+
+    if (!lineItems.isEmpty()) {
+        flushLine(y, lineHeight);
+    }
+
     return QRect(rect.left(), rect.top(), rect.width(), y + lineHeight - rect.top());
 }
 

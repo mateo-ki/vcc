@@ -10,6 +10,7 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QPlainTextEdit;
 class QPushButton;
 class QRadioButton;
 class QSpinBox;
@@ -94,6 +95,7 @@ private:
     QSpinBox *downloadTopNSpin_ = nullptr;
 
     // Card 4: 代理自愈
+    QPlainTextEdit *failoverProbeUrlsEdit_ = nullptr;
     QCheckBox *autoFailoverCheck_ = nullptr;
     QCheckBox *speedtestAutoRefillCheck_ = nullptr;
     QCheckBox *bandwidthGuardCheck_ = nullptr;

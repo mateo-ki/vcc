@@ -11,6 +11,9 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+
+#include <memory>
+#include <optional>
 #include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
@@ -27,9 +30,11 @@
 #include "export/ClashYamlExport.h"
 #include "export/UriExport.h"
 #include "gui/CountryNames.h"
+#include "gui/NodeCard.h"
 #include "gui/NodeText.h"
 #include "gui/Pages.h"
 #include "gui/Theme.h"
+#include "gui/Widgets.h"
 #include "gui/UiText.h"
 #include "ip/IpRisk.h"
 #include "parser/Subscription.h"
@@ -39,6 +44,24 @@
 namespace Gui {
 
 namespace {
+
+/// 清空一个布局里的子控件。三步缺一不可：
+/// ① hide() —— setParent(nullptr) 会让它瞬间变成顶层窗口，不先藏就会在桌面上闪一下；
+/// ② setParent(nullptr) —— deleteLater 要等事件循环回来才真删，留在父级下就是残影；
+/// ③ deleteLater 而不是同步 delete —— 重建网格可以是从卡片自己的点击链里发起的
+///    （eventFilter → nodeSwitchRequested → MainWindow → refresh() → applyView），
+///    同步删掉正在被派发消息的那张卡就是 use-after-free。
+void clearLayout(QLayout *layout)
+{
+    while (QLayoutItem *item = layout->takeAt(0)) {
+        if (QWidget *widget = item->widget()) {
+            widget->hide();
+            widget->setParent(nullptr);
+            widget->deleteLater();
+        }
+        delete item;
+    }
+}
 
 QLabel *makeHeaderTitle(const QString &text, QWidget *parent)
 {
@@ -78,7 +101,7 @@ QWidget *NodesPage::buildFilterBar()
 {
     auto *card = new QFrame(this);
     Theme::decorateCard(card);
-    card->setObjectName(QStringLiteral("Card"));
+    Theme::decorateCard(card);
     auto *layout = new QHBoxLayout(card);
     layout->setContentsMargins(10, 6, 10, 6);
     layout->setSpacing(8);
@@ -105,7 +128,7 @@ QWidget *NodesPage::buildFilterBar()
     regionLabel->setObjectName(QStringLiteral("Subtitle"));
     layout->addWidget(regionLabel);
 
-    regionCombo_ = new QComboBox(card);
+    regionCombo_ = makeComboBox(card);
     regionCombo_->addItem(QStringLiteral("全部地区"), QStringLiteral("all"));
     regionCombo_->addItem(QStringLiteral("香港"), QStringLiteral("HK"));
     regionCombo_->addItem(QStringLiteral("日本"), QStringLiteral("JP"));
@@ -120,7 +143,7 @@ QWidget *NodesPage::buildFilterBar()
     latencyLabel->setObjectName(QStringLiteral("Subtitle"));
     layout->addWidget(latencyLabel);
 
-    latencyCombo_ = new QComboBox(card);
+    latencyCombo_ = makeComboBox(card);
     latencyCombo_->addItem(QStringLiteral("全部"), QStringLiteral("all"));
     latencyCombo_->addItem(QStringLiteral("可用"), QStringLiteral("alive"));
     latencyCombo_->addItem(QStringLiteral("不可用"), QStringLiteral("dead"));
@@ -135,7 +158,7 @@ QWidget *NodesPage::buildFilterBar()
     sortLabel->setObjectName(QStringLiteral("Subtitle"));
     layout->addWidget(sortLabel);
 
-    sortCombo_ = new QComboBox(card);
+    sortCombo_ = makeComboBox(card);
     sortCombo_->addItem(QStringLiteral("延迟"), QStringLiteral("latency"));
     sortCombo_->addItem(QStringLiteral("下载速度"), QStringLiteral("download"));
     sortCombo_->addItem(QStringLiteral("更新时间"), QStringLiteral("updated"));
@@ -162,24 +185,22 @@ QWidget *NodesPage::buildActionBar()
     layout->setSpacing(8);
 
     layout->addWidget(new QLabel(QStringLiteral("测速强度:"), bar));
-    intensityCombo_ = new QComboBox(bar);
+    intensityCombo_ = makeComboBox(bar);
     intensityCombo_->addItem(QStringLiteral("快速测试"), int(Speedtest::SpeedtestIntensity::Fast));
     intensityCombo_->addItem(QStringLiteral("标准测试"), int(Speedtest::SpeedtestIntensity::Standard));
     intensityCombo_->addItem(QStringLiteral("深度测试"), int(Speedtest::SpeedtestIntensity::Deep));
     layout->addWidget(intensityCombo_);
 
-    auto *speedPageBtn = new QPushButton(QStringLiteral("测速本页"), bar);
-    speedPageBtn->setObjectName(QStringLiteral("AccentBtn"));
-    connect(speedPageBtn, &QPushButton::clicked, this, &NodesPage::speedtestPage);
-    layout->addWidget(speedPageBtn);
+    speedGroupBtn_ = new QPushButton(QStringLiteral("测速当前订阅"), bar);
+    speedGroupBtn_->setObjectName(QStringLiteral("AccentBtn"));
+    speedGroupBtn_->setToolTip(UiText::speedGroupHover());
+    connect(speedGroupBtn_, &QPushButton::clicked, this, &NodesPage::speedtestCurrentGroup);
+    layout->addWidget(speedGroupBtn_);
 
-    auto *speedGroupBtn = new QPushButton(QStringLiteral("测速当前订阅"), bar);
-    connect(speedGroupBtn, &QPushButton::clicked, this, &NodesPage::speedtestCurrentGroup);
-    layout->addWidget(speedGroupBtn);
-
-    auto *speedAllBtn = new QPushButton(QStringLiteral("测速全部"), bar);
-    connect(speedAllBtn, &QPushButton::clicked, this, &NodesPage::speedtestAll);
-    layout->addWidget(speedAllBtn);
+    speedAllBtn_ = new QPushButton(QStringLiteral("测速全部"), bar);
+    speedAllBtn_->setToolTip(UiText::speedAllHover());
+    connect(speedAllBtn_, &QPushButton::clicked, this, &NodesPage::speedtestAll);
+    layout->addWidget(speedAllBtn_);
 
     // 节点清理菜单
     auto *cleanBtn = new QPushButton(QStringLiteral("节点清理 ▼"), bar);
@@ -192,6 +213,9 @@ QWidget *NodesPage::buildActionBar()
     cleanMenu->addSeparator();
     auto *clearAction = cleanMenu->addAction(QStringLiteral("清空全部节点"), this, [this]() { cleanupNodes(QStringLiteral("clear_all")); });
     cleanBtn->setMenu(cleanMenu);
+    // 标签里已经带了 "▼"，Qt 还会再画一个原生 menu-indicator → 两个箭头。
+    Gui::Theme::setWidgetCss(cleanBtn, QStringLiteral(
+        "QPushButton::menu-indicator { image: none; width: 0; }"));
     layout->addWidget(cleanBtn);
 
     // 剪贴板导入
@@ -206,6 +230,9 @@ QWidget *NodesPage::buildActionBar()
     exportMenu->addAction(QStringLiteral("URI 链接"), this, [this]() { exportNodes(QStringLiteral("uri")); });
     exportMenu->addAction(QStringLiteral("JSON 格式"), this, [this]() { exportNodes(QStringLiteral("json")); });
     exportBtn->setMenu(exportMenu);
+    // 标签里已经带了 "▼"，Qt 还会再画一个原生 menu-indicator → 两个箭头。
+    Gui::Theme::setWidgetCss(exportBtn, QStringLiteral(
+        "QPushButton::menu-indicator { image: none; width: 0; }"));
     layout->addWidget(exportBtn);
 
     auto *refreshBtn = new QPushButton(QStringLiteral("刷新"), bar);
@@ -311,82 +338,41 @@ int NodesPage::gridColumns() const
 QWidget *NodesPage::makeNodeCard(const Models::NodeSummary &node,
                                  const Proxy::ProxyRuntimeStatus &status)
 {
-    const bool isSelected = status.nodeId == node.id;
+    // 共用控制台那张自绘卡：两行（名字 / 协议 · 国家 · 延迟），配色与三态由
+    // NodeCardFrame 的 skin 负责（= Rust 的 panel/accent_bg + stroke）。
+    // 之前这里是"每卡一份 QSS"的 QFrame#Card，245 张卡实测多花 ~20MB。
+    ProxyViewRow row;
+    row.node = node;
+    row.country = node.country;
+    row.lowerName = node.name.toLower();
 
-    auto *card = new QFrame(gridHost_);
-    card->setObjectName(QStringLiteral("Card"));
-    card->setMinimumHeight(58);
+    auto *card = new NodeCardFrame(gridHost_);
+    card->bind(row, status, status.nodeId);
     card->setCursor(Qt::PointingHandCursor);
-    card->setProperty("nodeId", node.id);
-    card->setProperty("nodeName", node.name);
-    card->setToolTip(QStringLiteral("%1:%2\n点击连接，右键管理").arg(node.server).arg(node.port));
-
-    auto *box = new QVBoxLayout(card);
-    box->setContentsMargins(14, 11, 14, 11);
-    box->setSpacing(4);
-
-    auto *name = new QLabel(node.name, card);
-    name->setObjectName(isSelected ? QStringLiteral("Accent") : QStringLiteral("Title"));
-    box->addWidget(name);
-
-    auto *line = new QHBoxLayout();
-    line->setSpacing(8);
-    auto *protocol = new QLabel(node.protocol.toUpper(), card);
-    protocol->setObjectName(QStringLiteral("Muted"));
-    line->addWidget(protocol);
-
-    if (!node.country.isNull() && !node.country.isEmpty()) {
-        const CountryDisplay display = countryFlagAndName(node.country);
-        auto *where = new QLabel(QStringLiteral("%1 %2").arg(display.flag, display.name), card);
-        where->setObjectName(QStringLiteral("Subtitle"));
-        line->addWidget(where);
-    }
-    line->addStretch();
-
-    const LatencyDisplay latency = latencyText(node);
-    auto *latLabel = new QLabel(latency.text, card);
-    if (!latency.role.isEmpty()) {
-        latLabel->setObjectName(latency.role);
-    }
-    line->addWidget(latLabel);
-    box->addLayout(line);
-
-    if (isSelected) {
-        card->setAutoFillBackground(true);
-        QPalette palette = card->palette();
-        palette.setColor(QPalette::Window, Theme::current().accentBg);
-        card->setPalette(palette);
-    }
+    card->setToolTip(QStringLiteral("%1:%2").arg(node.server).arg(node.port)
+                     + QChar(10) + QStringLiteral("点击连接，右键管理"));
+    card->installEventFilter(this);
 
     const QString nodeId = node.id;
     const QString nodeName = node.name;
     card->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(card, &QWidget::customContextMenuRequested, this, [this, nodeId, nodeName]() {
+        // 菜单条目与控制台共用同一个构造器（文字全来自 Rust 生成的 UiText）。
+        // 顺序按 Rust views/nodes.rs：测速 / 详情 / IP 检测 / ── / 删除；
+        // 测速那条在 busy 时置灰（Rust 的 add_enabled(!self.busy, ...)）。
         QMenu menu;
-        QAction *actSpeed = menu.addAction(QStringLiteral("测速节点"));
-        QAction *actDetail = menu.addAction(QStringLiteral("查看详情"));
-        QAction *actIp = menu.addAction(QStringLiteral("IP 检测"));
-        menu.addSeparator();
-        QAction *actDel = menu.addAction(QStringLiteral("删除节点"));
-
+        const NodeCardMenu actions = addNodeCardMenu(&menu, true, !busy_, true, false);
         QAction *picked = menu.exec(QCursor::pos());
         if (picked == nullptr) {
             return;
         }
-        if (picked == actSpeed) {
-            Speedtest::SpeedTestOptions opt;
-            opt.timeoutMs = 5000;
-            context_.runAsync([this, nodeId, opt]() {
-                Speedtest::SpeedTester tester(context_.database().shared_from_this(), context_.tasks());
-                tester.testOne(nodeId, opt);
-            }, [this]() {
-                reloadNodes();
-            });
-        } else if (picked == actDetail) {
+        if (picked == actions.speedtest) {
+            speedtestNode(nodeId);
+        } else if (picked == actions.details) {
             showNodeDetails(nodeId);
-        } else if (picked == actIp) {
+        } else if (picked == actions.ipRisk) {
             checkIpRisk(nodeId);
-        } else if (picked == actDel) {
+        } else if (picked == actions.remove) {
             deleteNode(nodeId);
         }
     });
@@ -394,11 +380,29 @@ QWidget *NodesPage::makeNodeCard(const Models::NodeSummary &node,
     return card;
 }
 
+bool NodesPage::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::MouseButtonRelease) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        auto *card = qobject_cast<QWidget *>(watched);
+        if (card != nullptr && mouse->button() == Qt::LeftButton) {
+            const QString nodeId = card->property("nodeId").toString();
+            const QString nodeName = card->property("nodeName").toString();
+            if (!nodeId.isEmpty()) {
+                emit nodeSwitchRequested(nodeId, nodeName);
+                return true;
+            }
+        }
+    }
+    return Page::eventFilter(watched, event);
+}
+
 void NodesPage::applyView(bool force)
 {
     if (grid_ == nullptr) {
         return;
     }
+    updateActionEnabled();
     const int columns = gridColumns();
     // 整网格只取一次代理状态：makeNodeCard 每张卡都抢 runtimeMutex_ 的话，
     // 代理启动/切换期间（锁被秒级持有）会把 GUI 线程直接冻住。
@@ -420,12 +424,7 @@ void NodesPage::applyView(bool force)
 
     // 重建期间关掉整棵子树的更新：50 张卡的增删只触发一次布局/绘制。
     gridHost_->setUpdatesEnabled(false);
-    while (QLayoutItem *item = grid_->takeAt(0)) {
-        if (item->widget() != nullptr) {
-            delete item->widget();
-        }
-        delete item;
-    }
+    clearLayout(grid_);
 
     if (currentNodes_.isEmpty()) {
         auto *empty = new QLabel(QStringLiteral("当前筛选条件下没有节点"), gridHost_);
@@ -437,9 +436,12 @@ void NodesPage::applyView(bool force)
                              index / columns, index % columns);
         }
     }
-    for (int col = 0; col < columns; ++col) {
-        grid_->setColumnStretch(col, 1);
+    // 列数变小时要清掉多出来那几列的拉伸，否则它们还占着宽度（和 ProxyPage 同一套）。
+    for (int col = 0; col < gridColumnsHighWater_; ++col) {
+        grid_->setColumnStretch(col, col < columns ? 1 : 0);
+        grid_->setColumnMinimumWidth(col, 0);
     }
+    gridColumnsHighWater_ = qMax(gridColumnsHighWater_, columns);
     gridHost_->setUpdatesEnabled(true);
 
     lastGridColumns_ = columns;
@@ -476,12 +478,7 @@ void NodesPage::reloadGroups()
             return;
         }
         guard->groups_ = resultBox->value();
-        while (QLayoutItem *item = guard->groupsLayout_->takeAt(0)) {
-            if (item->widget() != nullptr) {
-                delete item->widget();
-            }
-            delete item;
-        }
+        clearLayout(guard->groupsLayout_);
 
         // 全部源
         qint64 totalAll = 0;
@@ -494,11 +491,11 @@ void NodesPage::reloadGroups()
         allBtn->setObjectName(QStringLiteral("Pill"));
         allBtn->setCheckable(true);
         allBtn->setChecked(guard->selectedSourceId_.isEmpty());
+        // 选中判据住在属性里：换订阅时只改勾选状态，不重建这一排（Rust 的
+        // `views/nodes.rs:343-347` 点击分支里只有 selected + page + reload_nodes）。
+        allBtn->setProperty("sourceId", QString());
         connect(allBtn, &QPushButton::clicked, guard.data(), [guard]() {
-            guard->selectedSourceId_.clear();
-            guard->page_ = 1;
-            guard->reloadGroups();
-            guard->reloadNodes();
+            guard->selectSource(QString());
         });
         guard->groupsLayout_->addWidget(allBtn);
 
@@ -512,16 +509,42 @@ void NodesPage::reloadGroups()
             btn->setObjectName(QStringLiteral("Pill"));
             btn->setCheckable(true);
             btn->setChecked(guard->selectedSourceId_ == sid);
+            btn->setProperty("sourceId", sid);
             connect(btn, &QPushButton::clicked, guard.data(), [guard, sid]() {
-                guard->selectedSourceId_ = sid;
-                guard->page_ = 1;
-                guard->reloadGroups();
-                guard->reloadNodes();
+                guard->selectSource(sid);
             });
             guard->groupsLayout_->addWidget(btn);
         }
         guard->groupsLayout_->addStretch();
     });
+}
+
+void NodesPage::selectSource(const QString &sourceId)
+{
+    // Rust 是 `selectable_label(...).clicked() && !selected`：点已经选中的那一颗
+    // 什么都不做，连节点表都不重读。
+    if (selectedSourceId_ == sourceId) {
+        return;
+    }
+    selectedSourceId_ = sourceId;
+    page_ = 1;
+    updateActionEnabled();
+    syncGroupSelection();
+    reloadNodes();
+}
+
+void NodesPage::syncGroupSelection()
+{
+    // 就地改勾选：重建这一排会先 clearLayout（整排瞬间消失）、再等一次异步
+    // listNodeGroups 回来才重新出现，而他只是换了个订阅。
+    // 只认带 `sourceId` 属性的那一颗 —— 筛选栏那颗「查询」也挂着 "Pill" 这个
+    // objectName，按 objectName 摸会把它一起改到。
+    for (int index = 0; index < groupsLayout_->count(); ++index) {
+        auto *pill = qobject_cast<QPushButton *>(groupsLayout_->itemAt(index)->widget());
+        if (pill != nullptr && pill->property("sourceId").isValid()) {
+            pill->setChecked(pill->property("sourceId").toString() == selectedSourceId_);
+        }
+    }
 }
 
 void NodesPage::reloadNodes()
@@ -596,69 +619,203 @@ void NodesPage::refresh()
     reloadNodes();
 }
 
-void NodesPage::speedtestPage()
+Speedtest::SpeedtestIntensity NodesPage::speedtestIntensity() const
 {
-    if (currentNodes_.isEmpty()) {
+    return intensityCombo_ != nullptr ? Speedtest::SpeedtestIntensity(intensityCombo_->currentData().toInt())
+                                      : Speedtest::defaultIntensity();
+}
+
+Speedtest::SpeedTestOptions NodesPage::speedOptions() const
+{
+    // 强度档位 + 系统设置那一组开关，一起折成这一轮真正用的参数（Rust speed_opts()）。
+    return Speedtest::speedOptionsFor(context_.settings(), speedtestIntensity());
+}
+
+void NodesPage::updateActionEnabled()
+{
+    // 对应 Rust 的 add_enabled(!busy, ...) 与 add_enabled(!busy && 选中了订阅, ...)。
+    // 灰掉而不是"点了没反应"：之前 busy_ 挡住重入时是静默 return，看着就像界面死了。
+    if (speedGroupBtn_ != nullptr) {
+        speedGroupBtn_->setEnabled(!busy_ && !selectedSourceId_.isEmpty());
+    }
+    if (speedAllBtn_ != nullptr) {
+        speedAllBtn_->setEnabled(!busy_);
+    }
+}
+
+void NodesPage::speedtestNode(const QString &nodeId)
+{
+    // 对应 Rust speedtest_one（gui/mod.rs:1992）：先报"正在测速节点..."，
+    // 回来再按 SpeedDone 那套汇总文案收尾，别默默测完。
+    if (busy_) {
         return;
     }
-    QVector<QString> ids;
-    for (const auto &n : currentNodes_) {
-        ids.push_back(n.id);
-    }
-    Speedtest::SpeedTestOptions opt;
-    opt.timeoutMs = 5000;
-    emit statusMessageRequested(QStringLiteral("正在对当前页节点执行测速..."));
+    const Speedtest::SpeedTestOptions opt = speedOptions();
+    busy_ = true;
+    updateActionEnabled();
+    emit statusMessageRequested(UiText::speedOneStatus());
     QPointer<NodesPage> guard(this);
-    context_.runAsync([this, ids, opt]() {
+    auto outcome = std::make_shared<Result<Models::SpeedTestSummary>>();
+    context_.runAsync([this, nodeId, opt, outcome]() {
         Speedtest::SpeedTester tester(context_.database().shared_from_this(), context_.tasks());
-        tester.testMany(ids, opt);
-    }, [guard]() {
-        if (!guard.isNull()) {
-            guard->refresh();
-            emit guard->statusMessageRequested(QStringLiteral("本页测速完成"));
+        auto one = tester.testOne(nodeId, opt);
+        if (one.isErr()) {
+            *outcome = Result<Models::SpeedTestSummary>::withError(one.error());
+            return;
         }
+        const Models::LatencyResult probe = one.value();
+        Models::SpeedTestSummary summary;
+        summary.total = 1;
+        summary.ok = probe.ok ? 1 : 0;
+        summary.fail = probe.ok ? 0 : 1;
+        summary.avgMs = probe.latencyMs.has_value() ? std::optional<double>(*probe.latencyMs) : std::nullopt;
+        summary.avgDownloadKbps = probe.downloadKbps.has_value()
+            ? std::optional<double>(*probe.downloadKbps)
+            : std::nullopt;
+        summary.results = {probe};
+        *outcome = Result<Models::SpeedTestSummary>::withValue(std::move(summary));
+    }, [guard, outcome]() {
+        if (guard.isNull()) {
+            return;
+        }
+        guard->busy_ = false;
+        guard->updateActionEnabled();
+        guard->reloadNodes();
+        emit guard->statusMessageRequested(outcome->isOk() ? speedDoneText(outcome->value())
+                                        : UiText::speedDoneFailed().arg(outcome->error()));
     });
 }
 
 void NodesPage::speedtestCurrentGroup()
 {
     if (selectedSourceId_.isEmpty()) {
-        speedtestAll();
+        // Rust 这边没有"没选中就测全部"的退路：那颗按钮本来就是灰的。
         return;
     }
-    emit statusMessageRequested(QStringLiteral("正在对当前订阅节点执行测速..."));
-    const QString sid = selectedSourceId_;
+    speedtestSource(selectedSourceId_);
+}
+
+namespace {
+
+std::optional<QString> trimmedOption(const QLineEdit *edit)
+{
+    if (edit == nullptr) {
+        return std::nullopt;
+    }
+    const QString text = edit->text().trimmed();
+    return text.isEmpty() ? std::nullopt : std::optional<QString>(text);
+}
+
+} // namespace
+
+/// 测某一个订阅源的节点（"测速当前订阅"和"粘贴导入后自动测速"共用这一条路）。
+/// 筛选条件必须带上：Rust 的 hover 明写"测速当前订阅中**符合筛选条件**的全部节点"。
+void NodesPage::speedtestSource(const QString &sourceId)
+{
+    if (busy_ || sourceId.isEmpty()) {
+        return;
+    }
+    busy_ = true;
+    updateActionEnabled();
+
+    QString groupName = sourceId;
+    qint64 groupTotal = 0;
+    for (const Models::NodeGroupSummary &group : groups_) {
+        if (group.sourceId == sourceId) {
+            groupName = group.sourceName;
+            groupTotal = group.total;
+            break;
+        }
+    }
+    emit statusMessageRequested(UiText::speedGroupStatus().arg(groupName).arg(groupTotal));
+
+    std::optional<QString> protocol = trimmedOption(protocolEdit_);
+    std::optional<QString> keyword = trimmedOption(keywordEdit_);
+    std::optional<QString> latency;
+    if (onlyAvailableCheck_ != nullptr && onlyAvailableCheck_->isChecked()) {
+        latency = QStringLiteral("alive");
+    } else if (latencyCombo_ != nullptr
+               && latencyCombo_->currentData().toString() != QStringLiteral("all")) {
+        latency = latencyCombo_->currentData().toString();
+    }
+
+    const Speedtest::SpeedTestOptions opt = speedOptions();
+    const QString sid = sourceId;
     QPointer<NodesPage> guard(this);
-    context_.runAsync([this, sid]() {
-        auto idsRes = context_.database().listNodeIdsForGroup(sid, std::nullopt, std::nullopt, std::nullopt);
-        if (idsRes.isOk()) {
-            Speedtest::SpeedTestOptions opt;
-            opt.timeoutMs = 5000;
-            Speedtest::SpeedTester tester(context_.database().shared_from_this(), context_.tasks());
-            tester.testMany(idsRes.value(), opt);
+    auto outcome = std::make_shared<Result<Models::SpeedTestSummary>>();
+    context_.runAsync([this, sid, protocol, keyword, latency, opt, outcome, guard]() {
+        auto idsRes = context_.database().listNodeIdsForGroup(sid, protocol, keyword, latency);
+        if (!idsRes.isOk()) {
+            *outcome = Result<Models::SpeedTestSummary>::withError(idsRes.error());
+            return;
         }
-    }, [guard]() {
-        if (!guard.isNull()) {
-            guard->refresh();
-            emit guard->statusMessageRequested(QStringLiteral("订阅测速完成"));
+        if (idsRes.value().isEmpty()) {
+            *outcome = Result<Models::SpeedTestSummary>::withError(UiText::speedGroupEmpty());
+            return;
         }
+        Speedtest::SpeedTester tester(context_.database().shared_from_this(), context_.tasks());
+        *outcome = tester.testManyWithProgress(
+            idsRes.value(), opt, [guard](const Speedtest::SpeedTestProgress &p) {
+                if (guard.isNull()) {
+                    return;
+                }
+                QMetaObject::invokeMethod(guard.data(), [guard, p]() {
+                    if (guard.isNull()) {
+                        return;
+                    }
+                    emit guard->statusMessageRequested(formatSpeedtestProgress(p));
+                }, Qt::QueuedConnection);
+            });
+    }, [guard, outcome]() {
+        if (guard.isNull()) {
+            return;
+        }
+        guard->busy_ = false;
+        guard->updateActionEnabled();
+        guard->refresh();
+        emit guard->statusMessageRequested(outcome->isOk() ? speedDoneText(outcome->value())
+                                        : UiText::speedDoneFailed().arg(outcome->error()));
     });
 }
 
 void NodesPage::speedtestAll()
 {
-    emit statusMessageRequested(QStringLiteral("正在对全部节点执行测速..."));
+    if (!context_.tryBeginFullSpeedtest()) {
+        return;
+    }
+    busy_ = true;
+    updateActionEnabled();
+    emit statusMessageRequested(UiText::speedAllInitial());
     QPointer<NodesPage> guard(this);
-    context_.runAsync([this]() {
-        Speedtest::SpeedTestOptions opt;
-        opt.timeoutMs = 5000;
+    auto outcome = std::make_shared<Result<Models::SpeedTestSummary>>();
+    const Speedtest::SpeedTestOptions opt = speedOptions();
+    context_.runAsync([this, opt, outcome, guard]() {
         Speedtest::SpeedTester tester(context_.database().shared_from_this(), context_.tasks());
-        tester.testAllSources(opt);
-    }, [guard]() {
-        if (!guard.isNull()) {
-            guard->refresh();
-            emit guard->statusMessageRequested(QStringLiteral("全部测速完成"));
+        *outcome = tester.testAllSourcesWithProgress(opt, [guard](size_t done, size_t total) {
+            if (guard.isNull()) {
+                return;
+            }
+            QMetaObject::invokeMethod(guard.data(), [guard, done, total]() {
+                if (guard.isNull()) {
+                    return;
+                }
+                emit guard->statusMessageRequested(
+                    UiText::speedAllProgress().arg(qint64(done)).arg(qint64(total)));
+            }, Qt::QueuedConnection);
+        });
+    }, [guard, outcome, ctx = QPointer<App::AppContext>(&context_)]() {
+        // 门要在这一趟结束时开回来，哪怕页面已经关了（否则这道门永远关着，之后谁都测不了）。
+        if (ctx != nullptr) {
+            ctx->endFullSpeedtest();
         }
+        if (guard.isNull()) {
+            return;
+        }
+        guard->busy_ = false;
+        guard->updateActionEnabled();
+        guard->refresh();
+        emit guard->statusMessageRequested(outcome->isOk() ? speedDoneText(outcome->value())
+                                        : UiText::speedDoneFailed().arg(outcome->error()));
     });
 }
 

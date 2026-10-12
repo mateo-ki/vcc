@@ -1,4 +1,5 @@
-qt_add_executable(vccSourcesPageTests guiSourcesPage/SourcesPageTests.cpp)
+qt_add_executable(vccSourcesPageTests guiSourcesPage/SourcesPageTests.cpp
+    guiSourcesPage/PasteShortcutTests.cpp)
 target_include_directories(vccSourcesPageTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(vccSourcesPageTests PRIVATE
     vccGui vccApp vccDb vccProxy vccKernel vccParser vccCore vccModels Qt6::Core

@@ -13,7 +13,7 @@
 #include "proxy/SingBoxConfig.h"
 #include "proxy_probe/JoinWindow.h"
 #include "proxy_probe/ProbeKernel.h"
-#include "proxy_probe/TestUrls.h"
+#include "proxy/TestUrls.h"
 
 namespace ProxyProbe {
 namespace {
@@ -116,7 +116,7 @@ Result<QVector<ProbeResult>> probeBatchWithSingBox(const QString &binary,
     // 配置写完了才放端口：内核要 bind 它们（Rust 的 drop(reservations)）。
     reservations.release();
 
-    Result<TempWorkDir> created = TempWorkDir::create(QStringLiteral("vpn-parser-sing-box-batch"));
+    Result<TempWorkDir> created = TempWorkDir::create(QStringLiteral("vcc-sing-box-batch"));
     if (created.isErr()) {
         return Result<QVector<ProbeResult>>::withError(created.error());
     }

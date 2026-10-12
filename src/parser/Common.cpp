@@ -402,24 +402,38 @@ QString expandUrlTemplate(const QString& text)
 {
     // Rust 用 chrono::Local::now()，是本地日期而不是 UTC。
     const QDate today = QDate::currentDate();
-    const QString y = QStringLiteral("%1").arg(today.year(), 4, 10, QLatin1Char('0'));
+    const QString y4 = QStringLiteral("%1").arg(today.year(), 4, 10, QLatin1Char('0'));
     const QString m = QStringLiteral("%1").arg(today.month(), 2, 10, QLatin1Char('0'));
     const QString d = QStringLiteral("%1").arg(today.day(), 2, 10, QLatin1Char('0'));
-    const QString ymd = y + m + d;
-    const QString ymdShort = y.right(2) + m + d;
+    const QString y2 = y4.right(2);
+    const QString ymd = y4 + m + d;
+    const QString ymdShort = y2 + m + d;
     const QString mNoZero = stripLeadingZeros(m);
     const QString dNoZero = stripLeadingZeros(d);
     const QString mShort = mNoZero.isEmpty() ? QStringLiteral("0") : mNoZero;
     const QString dShort = dNoZero.isEmpty() ? QStringLiteral("0") : dNoZero;
 
+    // 花括号把每个 token 封死了："{YYYY}" 里不含子串 "{Y}"（少一个右花括号），
+    // 所以这 14 条替换互不吃对方，顺序无关紧要。
     QString out = text;
     out.replace(QStringLiteral("{Ymd}"), ymd);
     out.replace(QStringLiteral("{ymd}"), ymdShort);
-    out.replace(QStringLiteral("{Y}"), y);
+    out.replace(QStringLiteral("{Y}"), y4);
     out.replace(QStringLiteral("{mm}"), m);
     out.replace(QStringLiteral("{m}"), mShort);
     out.replace(QStringLiteral("{dd}"), d);
     out.replace(QStringLiteral("{d}"), dShort);
+    // 上面 7 个是 Rust 原样的（parser/common.rs:34-41）。下面 7 个是 2026-10-11 他点名要
+    // 补齐的大小写别名，语义照 "{Ymd}/{ymd}" 已有的那套走：大写年=4 位、小写年=2 位，
+    // 月/日只是"补零 vs 不补零"的差别。写了不认的占位符会原样留在 URL 里（→ 404），
+    // 所以新增的同时必须让"新增订阅源"那个 ? 提示里的清单和这里一一对得上。
+    out.replace(QStringLiteral("{YYYY}"), y4);
+    out.replace(QStringLiteral("{yyyy}"), y2);
+    out.replace(QStringLiteral("{y}"), y2);
+    out.replace(QStringLiteral("{MM}"), m);
+    out.replace(QStringLiteral("{M}"), mShort);
+    out.replace(QStringLiteral("{DD}"), d);
+    out.replace(QStringLiteral("{D}"), dShort);
     return out;
 }
 

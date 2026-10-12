@@ -19,7 +19,7 @@
 #include "proxy_probe/JoinWindow.h"
 #include "proxy_probe/ProbeKernel.h"
 #include "proxy_probe/ProbeMessages.h"
-#include "proxy_probe/TestUrls.h"
+#include "proxy/TestUrls.h"
 
 namespace ProxyProbe {
 namespace {
@@ -361,7 +361,7 @@ Result<QVector<ProbeResult>> verifyNodesWithMihomoPath(const QVector<Models::Nod
         return Result<QVector<ProbeResult>>::withValue(flattenResults(results));
     }
 
-    Result<TempWorkDir> created = TempWorkDir::create(QStringLiteral("vpn-parser-mihomo"));
+    Result<TempWorkDir> created = TempWorkDir::create(QStringLiteral("vcc-mihomo"));
     if (created.isErr()) {
         return Result<QVector<ProbeResult>>::withError(created.error());
     }

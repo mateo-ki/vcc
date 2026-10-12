@@ -471,8 +471,9 @@ TEST(KernelManager, environment_override_reads_the_kernel_specific_variable)
 #ifdef Q_OS_WIN
 TEST(KernelManager, installed_kernel_layout_resolves_under_the_app_data_directory)
 {
-    // 只读校验装机目录：绝不执行那里任何二进制。
-    const QString appDir = QStringLiteral(R"(D:\software\VPN Parser)");
+    // 只读校验装机目录：绝不执行那里任何二进制。路径是个**占位安装目录**
+    // （和 Rust 那条测试一样用中性形状），真的内核没装在这里时整条跳过。
+    const QString appDir = QStringLiteral(R"(C:\Apps\vpn-parser)");
     const QString installed = QDir(appDir)
                                   .absoluteFilePath(QStringLiteral("data/kernels/mihomo/mihomo.exe"));
     if (!QFileInfo(installed).isFile()) {

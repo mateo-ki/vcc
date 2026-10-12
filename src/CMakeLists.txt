@@ -130,6 +130,7 @@ target_include_directories(vccGeo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vccGeo PUBLIC
     vccCore
     vccKernel
+    vccKernelManager
     vccNet
     vccSysProxy
     Qt6::Core
@@ -191,15 +192,26 @@ target_link_libraries(vccGui PUBLIC
     vccTelegram
     vccPlatform
     vccApi
+    vccContext
+    vccNet
+    vccParser
+    vccRouter
+    vccSysProxy
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
 )
 vcc_target_options(vccGui)
+# 试过给 GUI 层再叠一份它自己的 PCH（<QWidget>/<QPainter>/布局头，公共那份不能放
+# Widgets —— vccCore/vccNet 根本没链接 Qt6::Widgets，头都找不到）。A/B 实测**没收益**：
+# 改 src/gui/Theme.h 触发 41 个 TU 重编，带 GUI PCH 29.2s、不带 27.3s，多那一份
+# PCH 的编译时间没被摊薄。所以只留 vcc_target_options 里的公共 PCH。
 
 add_library(vccApp STATIC
     app/MainWindow.cpp
-    app/AppContext.cpp
+    app/MainWindowFailover.cpp
+    app/ExitCleanup.cpp
+    vcc.qrc
 )
 
 target_include_directories(vccApp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -218,16 +230,29 @@ target_link_libraries(vccApp PUBLIC
     vccPlatform
     vccApi
     vccKernelManager
+    vccContext
+    vccRouter
+    vccProbe
+    vccSpeedtest
 )
 
 vcc_target_options(vccApp)
 
-qt_add_executable(vcc
-    app/main.cpp
-)
+# vcc.rc（图标 + 版本信息）和 WIN32_EXECUTABLE（不带控制台）都是 Windows 专属。
+set(VCC_APP_SOURCES app/main.cpp vcc.qrc)
+if (WIN32)
+    list(APPEND VCC_APP_SOURCES vcc.rc)
+endif()
+
+qt_add_executable(vcc ${VCC_APP_SOURCES})
 
 target_link_libraries(vcc PRIVATE
     vccApp
+    vccContext
+    vccCore
+    vccGui
+    vccApi
+    vccPlatform
     vccKernelConfig
     vccCollector
     vccTelegram
@@ -235,7 +260,9 @@ target_link_libraries(vcc PRIVATE
     vccExport
 )
 
-set_target_properties(vcc PROPERTIES WIN32_EXECUTABLE TRUE)
+if (WIN32)
+    set_target_properties(vcc PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
 include(${CMAKE_SOURCE_DIR}/cmake/DeployRuntime.cmake OPTIONAL)
 
 add_library(vccExport STATIC
@@ -309,7 +336,7 @@ function(vcc_port_layer target dir)
         target_include_directories(${target} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         target_link_libraries(${target} PUBLIC ${layer_libs})
         if(MSVC)
-            target_compile_options(${target} PRIVATE /utf-8 /Zc:__cplusplus /permissive-)
+            target_compile_options(${target} PRIVATE /utf-8 /Zc:__cplusplus /permissive- /MP)
         endif()
     else()
         add_library(${target} INTERFACE)
@@ -319,14 +346,14 @@ function(vcc_port_layer target dir)
 endfunction()
 
 vcc_port_layer(vccTasks tasks vccCore vccModels Qt6::Core)
-vcc_port_layer(vccProbe proxy_probe vccProxy vccExport vccKernel vccKernelManager vccPlatform vccNet
+vcc_port_layer(vccProbe proxy_probe vccCore vccModels vccProxy vccExport vccKernel vccKernelManager vccPlatform vccNet
     Qt6::Core Qt6::Concurrent)
-vcc_port_layer(vccSpeedtest speedtest vccDb vccNet vccProxy vccProbe vccKernel vccTasks Qt6::Core Qt6::Concurrent)
-vcc_port_layer(vccScheduler scheduler vccDb vccCollector vccTelegram vccSpeedtest vccTasks vccProxy vccKernel Qt6::Core Qt6::Concurrent)
+vcc_port_layer(vccSpeedtest speedtest vccCore vccModels vccParser vccKernelManager vccDb vccNet vccProxy vccProbe vccKernel vccTasks Qt6::Core Qt6::Concurrent)
+vcc_port_layer(vccScheduler scheduler vccCore vccModels vccDb vccCollector vccTelegram vccSpeedtest vccTasks vccProxy vccKernel Qt6::Core Qt6::Concurrent)
 vcc_port_layer(vccRouter router vccCore vccModels Qt6::Core)
-vcc_port_layer(vccApi api vccDb vccProxy vccCollector vccTelegram vccSpeedtest vccScheduler
+vcc_port_layer(vccApi api vccCore vccModels vccKernelManager vccDb vccProxy vccCollector vccTelegram vccSpeedtest vccScheduler
     vccTasks vccRouter vccExport vccKernel vccNet Qt6::Widgets)
-vcc_port_layer(vccUpdater updater vccKernel vccKernelManager vccNet vccGeo vccTasks
+vcc_port_layer(vccUpdater updater vccCore vccSysProxy vccKernel vccKernelManager vccNet vccGeo vccTasks
     LibArchive::LibArchive ZLIB::ZLIB Qt6::Core)
 
 add_library(vccCollector STATIC
@@ -338,3 +365,28 @@ add_library(vccCollector STATIC
 target_include_directories(vccCollector PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vccCollector PUBLIC vccCore vccModels vccDb vccParser vccNet vccGeo vccTasks yaml-cpp::yaml-cpp)
 vcc_target_options(vccCollector)
+
+# ---------------------------------------------------------------------------
+# AppContext 单独成层，用来断开 vccGui <-> vccApp 的链接环。
+#
+# 五个页面都要拿 AppContext& 去访问数据库/代理/任务，而 AppContext 过去住在 vccApp 里，
+# vccApp 又依赖 vccGui —— 静态库允许这种环（符号在最后链接 exe 时才凑齐），所以它一直
+# 能编过，但"谁依赖谁"在构建系统里是假的。AppContext.h 只 include core/models/tasks，
+# 重依赖（api/db/proxy）全在 .cpp 里，所以拆出来是纯搬家。
+# 放在文件末尾：vcc_port_layer 用 if(TARGET) 过滤依赖，vccApi 必须先于这里存在。
+# ---------------------------------------------------------------------------
+add_library(vccContext STATIC
+    app/AppContext.cpp
+)
+target_include_directories(vccContext PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(vccContext PUBLIC
+    vccCore
+    vccModels
+    vccTasks
+    vccDb
+    vccProxy
+    vccApi
+    Qt6::Core
+    Qt6::Concurrent
+)
+vcc_target_options(vccContext)

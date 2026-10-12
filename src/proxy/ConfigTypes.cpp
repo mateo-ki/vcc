@@ -590,6 +590,44 @@ QVector<TrafficRule> gfwlistTrafficRules()
     };
 }
 
+namespace {
+
+/// 只看"匹配的是什么"，不看动作：用来判断某条兜底规则是不是已经在表里了。
+bool sameMatcherKindAndValue(const TrafficRule &left, const TrafficRule &right)
+{
+    if (left.matcher.kind != right.matcher.kind) {
+        return false;
+    }
+    if (left.matcher.kind == RuleMatcher::Kind::Quic) {
+        return true;
+    }
+    if (left.matcher.kind == RuleMatcher::Kind::Network) {
+        return left.matcher.network == right.matcher.network;
+    }
+    return left.matcher.value == right.matcher.value;
+}
+
+}
+
+QVector<TrafficRule> withMissingFallbackRules(const QVector<TrafficRule> &rules)
+{
+    if (rules.isEmpty()) {
+        return optimizeTrafficRules(recommendedTrafficRules());
+    }
+    QVector<TrafficRule> merged = rules;
+    const QVector<TrafficRule> fallbacks = recommendedTrafficRules();
+    for (const TrafficRule &fallback : fallbacks) {
+        const bool already = std::any_of(
+            merged.cbegin(), merged.cend(), [&](const TrafficRule &existing) {
+                return existing.action == fallback.action && sameMatcherKindAndValue(existing, fallback);
+            });
+        if (!already) {
+            merged.append(fallback);
+        }
+    }
+    return optimizeTrafficRules(merged);
+}
+
 QVector<TrafficRule> aiServiceRules()
 {
     // 实测这份 GeoSite.dat 里有 openai / anthropic 分类（没有 chatgpt/claude/gemini/

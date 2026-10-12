@@ -31,6 +31,10 @@ public:
     QString nodeRoot() const { return nodeRoot_; }
     std::shared_ptr<ConnectionPool> mainPool() const { return main_; }
 
+    /// 回收所有池里空闲够久的连接（Rust 那边由 sqlx 的后台维护任务做：主库 idle_timeout
+    /// 60s、订阅分库 30s）。GUI 由 AppContext 的定时器驱动；没有事件循环的地方不会跑。
+    void reapIdlePools();
+
     /// 分库文件名（不含扩展名）。source_id 可能来自 HTTP 查询参数，因此只接受
     /// UUID/哨兵形状的字符集；带 `/`、`\`、`..` 的一律归到未分组库，杜绝
     /// nodeRoot_.join 跑到目录外面去建库。

@@ -274,6 +274,8 @@ Status Database::migrate()
                  QStringLiteral("INTEGER NOT NULL DEFAULT 0"));
     ensureColumn(migrator, QStringLiteral("settings"), QStringLiteral("failover_latency_ms"),
                  QStringLiteral("INTEGER NOT NULL DEFAULT 1500"));
+    ensureColumn(migrator, QStringLiteral("settings"), QStringLiteral("failover_probe_urls"),
+                 QStringLiteral("TEXT NOT NULL DEFAULT ''"));
     ensureColumn(migrator, QStringLiteral("settings"), QStringLiteral("auto_failover"),
                  QStringLiteral("INTEGER NOT NULL DEFAULT 0"));
     ensureColumn(migrator, QStringLiteral("settings"), QStringLiteral("speedtest_auto_refill"),

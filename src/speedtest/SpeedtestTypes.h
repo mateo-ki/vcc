@@ -11,6 +11,10 @@
 #include "kernel/KernelTypes.h"
 
 /// src/speedtest/mod.rs 的类型面。测速本身在 SpeedTester.h。
+namespace Models {
+struct AppSettings;
+}
+
 namespace Speedtest {
 
 /// 对应 Rust 的 `enum SpeedtestIntensity`（serde 用 snake_case）。
@@ -62,6 +66,13 @@ struct SpeedTestOptions {
     /// 下载测速只对延迟前 N 名做（0 = 所有通过节点都测）。
     int downloadTopN = 0;
 };
+
+/// 对应 Rust `gui/mod.rs:468 speed_opts()`：把「系统设置 → 测速」那一组开关 + 界面上的
+/// 强度档位，折成一次测速真正用的参数。之前节点池三处入口都是手搓
+/// `SpeedTestOptions opt; opt.timeoutMs = 5000;`，于是强度下拉框与设置里的并发/超时/
+/// 下载/常驻内核/并行内核/复用分钟/条件隔离**全部被忽略**，5000ms 还比 Rust 默认档的
+/// 1500ms 慢三倍 —— 这是"点测速很慢"的第一处原因。
+SpeedTestOptions speedOptionsFor(const Models::AppSettings &settings, SpeedtestIntensity intensity);
 
 /// 对应 Rust 的 `impl Default for SpeedTestOptions`（:96）。
 inline SpeedTestOptions defaultOptions()

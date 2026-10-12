@@ -39,3 +39,6 @@ target_link_libraries(vccSpeedtestTests PRIVATE ${vccSpeedtestTestLibs})
 vcc_target_options(vccSpeedtestTests)
 
 add_test(NAME vccSpeedtestTests COMMAND vccSpeedtestTests)
+# PrefilterActuallyRunsTheConfiguredConcurrency 量的是墙钟地板（t1 vs t256）：
+# -j8 里别的套件抢 CPU 就会把地板抬高（和 vccProxyPerfTests 同一类，别再记成偶发红）。
+set_tests_properties(vccSpeedtestTests PROPERTIES RUN_SERIAL TRUE)

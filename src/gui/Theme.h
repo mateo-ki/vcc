@@ -42,6 +42,14 @@ struct Palette {
     QColor dangerBg;
     /// 危险按钮的描边：从 danger 与底色推出来，保证浅底主题下也不会糊成一片。
     QColor dangerStroke;
+    /// 运行日志那一块的"深色终端"三件套。Rust 侧日志只是普通面板上的 monospace 文本
+    /// （`views/proxy.rs::ui_proxy_logs`），这层深底是 Qt 侧自己加的观感；既然留着，
+    /// 就把它收进调色板当语义字段，别让它当应用级样式表里仅剩的几个裸色值 ——
+    /// `ComboTheme.appStyleSheetOnlyUsesPaletteColors` 就是抓这个的。
+    QColor logViewBg;
+    QColor logViewFg;
+    QColor logViewBorder;
+
     QColor sidebarText;
     QColor sidebarMuted;
     bool light = true;
@@ -91,9 +99,34 @@ bool isLight();
 void apply(const QString &id);
 QString styleSheet(const Palette &palette);
 
-/// 卡片分层：浅色主题靠阴影分层所以不描边；深色主题阴影会糊成一团脏的，反过来留一条 1px 边。
-/// Qt 的样式表没有 box-shadow，用 QGraphicsDropShadowEffect 实现同一件事。
+/// 按控件挂的样式表用语义槽写颜色，别在页面里写死 hex。
+/// `Theme::cssWithPalette("color: {muted}; border: 1px solid {borderSubtle};")`
+/// 里的 `{...}` 会换成当前调色板的同名色（#rrggbb）。
+/// Why：页面里散着的 `#ef4444`/`#10b981`/`#f59e0b` 有三宗罪——① Rust 那侧
+/// `theme.rs` 早就定了"页面上不许出现红和黄"，写死的色值把这条约束绕过去了；
+/// ② 切主题时应用级 QSS 会重来一遍，按控件写死的这份不会；③ 一个语义色有好几种
+/// 近似写法（#64748b/#888888/#94a3b8 都当"次要文字"在用），谁也改不动谁。
+/// 认不出的槽名保持原样，好让守卫测试把漏字的地方直接指出来。
+QString cssWithPalette(const QString &pattern);
+
+/// 用 `cssWithPalette` 给某个控件挂样式表，并把原始模板记在控件上。
+/// Why：应用级 QSS 在切换主题时由 Qt 自己重解析，但**按控件挂的那一份不会**——
+/// 里面只要用到随主题变的槽（accent / accentBg / primaryBtn 这一族），切完主题
+/// 就会停在上一个颜色上（实测：切到"陶土橙"后下拉框的聚焦边框还是钴蓝）。
+/// `apply()` 会遍历所有顶层窗口，把带模板的控件按新调色板重挂一遍。
+/// 只写中性槽（muted / panel / border / text 这几族）的可以直接 `setStyleSheet`：
+/// 五套主题共用同一份中性 ramp，这是 ShellTests 里钉住的不变量。
+void setWidgetCss(QWidget *widget, const QString &pattern);
+
+/// 卡片：白底 + 1px 描边 + 12px 圆角。**背景必须由控件自己带一份**——
+/// 应用级那条 `QFrame#Card` 实测铺不上（离屏量卡片自己的内边距：只有应用级规则时是
+/// #efefef，控件带一份才是 #ffffff），所以以前散在各页的"每卡一份 QFrame#Card{...}"
+/// 不是冗余，删不得；这里把它收成一处（颜色是语义槽，切主题由 apply() 重挂）。
 void decorateCard(QFrame *card);
+
+/// 卡片里的内块：panelHover 底 + borderSubtle 描边 + 8px 圆角（同一套道理，也得自带一份）。
+/// 对应 Rust `views/proxy.rs:849` 的内框 fill=panel_hover、`widgets.rs:206` 的 stroke=border_subtle。
+void decorateInnerBlock(QFrame *block);
 
 }
 }

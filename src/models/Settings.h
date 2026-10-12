@@ -64,6 +64,11 @@ struct AppSettings {
     /// 「节点故障自动切换」。以前它只是界面里的一个内存字段、重启就回 false，
     /// 用户以为开着而实际没开。默认仍关：不擅自改行为。
     bool autoFailover = false;
+    /// 故障转移的基准站点，**每行一个 URL**（空 = 用内置的 Google 204）。判定是"任一
+    /// 拿到 2xx 就算通，全部失败才记一次故障" —— 要求全部可达的话，填一个会被对方 WAF
+    /// 拒的站就永远判故障，切换会无限抖。只影响"要不要换出口"这一路，不参与启动验证、
+    /// 也不参与「可用节点」的判定。
+    QString failoverProbeUrls;
     /// 测通的节点太少时，后台自动补一轮全量测速（默认关）。
     bool speedtestAutoRefill = false;
     /// 「预备」状态下自动把缺的内核下载下来。这条**默认开**：新装的机器上第一次启动
@@ -109,6 +114,7 @@ struct UpdateSettings {
     std::optional<QString> kernelSource;
     std::optional<bool> firewallAutoAllow;
     std::optional<bool> autoFailover;
+    std::optional<QString> failoverProbeUrls;
     std::optional<bool> speedtestAutoRefill;
     std::optional<bool> autoPrepareKernel;
     std::optional<bool> speedtestAddedSource;

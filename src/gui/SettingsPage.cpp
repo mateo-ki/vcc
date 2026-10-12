@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRadioButton>
@@ -20,6 +21,7 @@
 #include "db/Database.h"
 #include "gui/Pages.h"
 #include "gui/Theme.h"
+#include "gui/Widgets.h"
 #include "gui/UiText.h"
 #include "kernel/KernelManager.h"
 #include "net/HttpClient.h"
@@ -39,8 +41,9 @@ QLabel *makeHeaderTitle(const QString &text, QWidget *parent)
 
 QFrame *makeCardFrame(QWidget *parent)
 {
+    // 走 Theme::decorateCard：卡片的底色必须由控件自己带一份（应用级那条不生效）。
     auto *card = new QFrame(parent);
-    card->setObjectName(QStringLiteral("Card"));
+    Theme::decorateCard(card);
     return card;
 }
 
@@ -54,6 +57,29 @@ QString normalizeApiBase(QString raw)
         raw = QStringLiteral("https://") + raw;
     }
     return raw;
+}
+
+/// 状态文字的颜色一律从主题取，不在页面里写死 hex。
+/// Why：这一页以前自己撒了 #10b981（亮绿）/#f59e0b（琥珀）/#888888（中性灰），
+/// 而 Rust 那侧 `theme.rs` 早就把警告/危险改成石墨蓝灰（用户 2026-10-06："页面上
+/// 不要红色和黄色"，严重度靠字重+图标+措辞），绿色只留给"实测正常/连通"。
+/// 五套主题共用的正是同一份中性 ramp，所以按控件挂一次不会随切主题失效。
+QString mutedCss(int pixelSize)
+{
+    return QStringLiteral("color: %1; font-size: %2px;")
+        .arg(Theme::current().muted.name(), QString::number(pixelSize));
+}
+
+QString successCss(int pixelSize)
+{
+    return QStringLiteral("color: %1; font-size: %2px;")
+        .arg(Theme::current().success.name(), QString::number(pixelSize));
+}
+
+QString warningCss(int pixelSize)
+{
+    return QStringLiteral("color: %1; font-size: %2px;")
+        .arg(Theme::current().warning.name(), QString::number(pixelSize));
 }
 
 } // namespace
@@ -75,6 +101,11 @@ SettingsPage::SettingsPage(App::AppContext &context, QWidget *parent)
 
     root->addWidget(buildBottomBar());
 
+    // 每个输入控件自带一份模板，不能只靠应用级 QSS（卡片里铺不进去）。系统设置页以前
+    // 漏了这一步，于是"关闭按钮 X 时"那两个单选钮掉回应用级样式 —— 选中态画成空心圆环，
+    // 而全应用统一的实心点住在这份模板里。别把这条挪进 refresh()：那是设置变更就重挂。
+    Gui::decorateFieldsIn(this);
+
     connect(&context_, &App::AppContext::settingsChanged, this, &SettingsPage::refresh);
     loadFromSettings();
 }
@@ -89,7 +120,7 @@ QWidget *SettingsPage::buildHeader()
     auto *titleRow = new QHBoxLayout();
     titleRow->addWidget(makeHeaderTitle(QStringLiteral("系统设置"), header));
     auto *sub = new QLabel(QStringLiteral("应用行为 · 定时拉取 · 测速参数 · 网络与自愈服务"), header);
-    sub->setStyleSheet(QStringLiteral("color: #888888; font-size: 12px;"));
+    sub->setStyleSheet(mutedCss(12));
     titleRow->addWidget(sub);
     titleRow->addStretch();
     layout->addLayout(titleRow);
@@ -98,7 +129,7 @@ QWidget *SettingsPage::buildHeader()
     actionRow->addStretch();
 
     headerSyncLabel_ = new QLabel(QStringLiteral("✓ 已同步"), header);
-    headerSyncLabel_->setStyleSheet(QStringLiteral("color: #10b981; font-size: 11px;"));
+    headerSyncLabel_->setStyleSheet(successCss(11));
     actionRow->addWidget(headerSyncLabel_);
 
     auto *resetBtn = new QPushButton(QStringLiteral("重置修改"), header);
@@ -127,7 +158,7 @@ QWidget *SettingsPage::buildScrollContent()
     advancedToggleCheck_ = new QCheckBox(QStringLiteral("显示高级设置"), content);
     advRow->addWidget(advancedToggleCheck_);
     auto *advHint = new QLabel(QStringLiteral("只留常用的配置；订阅并发、测速深度参数等收在高级设置中"), content);
-    advHint->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    advHint->setStyleSheet(mutedCss(11));
     advRow->addWidget(advHint);
     advRow->addStretch();
     layout->addLayout(advRow);
@@ -165,7 +196,7 @@ QWidget *SettingsPage::buildCardGeneral()
     layout->addWidget(title);
 
     auto *desc = new QLabel(QStringLiteral("管理桌面应用程序的关闭逻辑、托盘常驻行为以及系统物理内存回收。"), card);
-    desc->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    desc->setStyleSheet(mutedCss(11));
     layout->addWidget(desc);
 
     autoPrepareKernelCheck_ = new QCheckBox(
@@ -189,12 +220,12 @@ QWidget *SettingsPage::buildCardGeneral()
     layout->addSpacing(4);
     auto *themeRow = new QHBoxLayout();
     themeRow->addWidget(new QLabel(QStringLiteral("界面配色主题:"), card));
-    themeCombo_ = new QComboBox(card);
+    themeCombo_ = makeComboBox(card);
     const auto &themeList = Theme::themes();
     for (const auto &t : themeList) {
         themeCombo_->addItem(t.name, t.id);
     }
-    connect(themeCombo_, &QComboBox::currentIndexChanged, this, [this]() {
+    connect(themeCombo_, &QComboBox::activated, this, [this]() {
         const QString tid = themeCombo_->currentData().toString();
         Theme::apply(tid);
         updateDirtyStatus();
@@ -209,7 +240,7 @@ QWidget *SettingsPage::buildCardGeneral()
     connect(trimMemoryBtn_, &QPushButton::clicked, this, &SettingsPage::trimMemory);
     memRow->addWidget(trimMemoryBtn_);
     trimStatusLabel_ = new QLabel(card);
-    trimStatusLabel_->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    trimStatusLabel_->setStyleSheet(mutedCss(11));
     memRow->addWidget(trimStatusLabel_);
     memRow->addStretch();
     layout->addLayout(memRow);
@@ -229,7 +260,7 @@ QWidget *SettingsPage::buildCardSubscription()
     layout->addWidget(title);
 
     auto *desc = new QLabel(QStringLiteral("在后台周期性拉取已启用的订阅源，自动解析更新节点池。"), card);
-    desc->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    desc->setStyleSheet(mutedCss(11));
     layout->addWidget(desc);
 
     autoFetchCheck_ = new QCheckBox(QStringLiteral("启用后台定时自动拉取全部有效订阅源"), card);
@@ -286,7 +317,7 @@ QWidget *SettingsPage::buildCardSpeedtest()
     layout->addWidget(title);
 
     auto *desc = new QLabel(QStringLiteral("配置全协议节点真实握手、TCP 预筛与下载带宽探测策略。"), card);
-    desc->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    desc->setStyleSheet(mutedCss(11));
     layout->addWidget(desc);
 
     autoSpeedtestCheck_ = new QCheckBox(QStringLiteral("订阅拉取完成后自动执行批量测速"), card);
@@ -309,6 +340,22 @@ QWidget *SettingsPage::buildCardSpeedtest()
     failoverLatencySpin_->setSuffix(QStringLiteral(" ms"));
     connect(failoverLatencySpin_, &QSpinBox::valueChanged, this, &SettingsPage::updateDirtyStatus);
     form->addRow(QStringLiteral("故障判定延迟阈值:"), failoverLatencySpin_);
+
+    // 故障转移的基准站点。留空就是内置的 Google generate_204；填他自己关心的站点，
+    // "能到 google 但到不了我的站"这种节点就会被换掉。只影响这一路实测，不参与启动
+    // 验证，也不参与「可用节点」的判定（那一条的口径必须和 Rust 的库保持一致）。
+    failoverProbeUrlsEdit_ = new QPlainTextEdit(card);
+    failoverProbeUrlsEdit_->setPlaceholderText(QStringList{
+        QStringLiteral("每行一个 URL，留空 = 内置 https://www.google.com/generate_204"),
+        QStringLiteral("例如：https://www.cloudflare.com/cdn-cgi/trace"),
+    }.join(QChar(10)));
+    failoverProbeUrlsEdit_->setFixedHeight(76);
+    failoverProbeUrlsEdit_->setToolTip(QStringLiteral(
+        "故障转移每 60 秒经当前出口逐个取这些地址，"
+        "任一条拿到 2xx 就算这次实测通过；全部失败（含 403/404 这类「到得了但被拒」）才记一次故障。"
+        "只影响故障转移与状态卡那行「实测」，不影响启动验证和「可用节点」的判定。"));
+    connect(failoverProbeUrlsEdit_, &QPlainTextEdit::textChanged, this, &SettingsPage::updateDirtyStatus);
+    form->addRow(QStringLiteral("故障转移基准站点:"), failoverProbeUrlsEdit_);
 
     // 高级设置项
     auto *advSpeedWidget = new QWidget(card);
@@ -370,7 +417,7 @@ QWidget *SettingsPage::buildCardFailover()
     layout->addWidget(title);
 
     auto *desc = new QLabel(QStringLiteral("管理断连自动切换 (Failover)、带宽保护与选路调度判定。"), card);
-    desc->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    desc->setStyleSheet(mutedCss(11));
     layout->addWidget(desc);
 
     autoFailoverCheck_ = new QCheckBox(
@@ -416,7 +463,7 @@ QWidget *SettingsPage::buildCardFirewall()
         QStringLiteral("防火墙会拦掉发到本程序与内核监听端口的回环连接。规则按程序路径放行，重编译或换版本后路径不变，规则照样有效。"),
         card);
     desc->setWordWrap(true);
-    desc->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    desc->setStyleSheet(mutedCss(11));
     layout->addWidget(desc);
 
     firewallAutoAllowCheck_ = new QCheckBox(QStringLiteral("软件启动时自动加入允许应用"), card);
@@ -427,9 +474,7 @@ QWidget *SettingsPage::buildCardFirewall()
     firewallPrivilegeLabel_ = new QLabel(
         elevated ? QStringLiteral("当前是管理员权限，可以立即写入规则")
                  : QStringLiteral("当前非管理员：勾选只记住，提权启动时再自动补上"), card);
-    firewallPrivilegeLabel_->setStyleSheet(
-        elevated ? QStringLiteral("color: #10b981; font-size: 11px;")
-                 : QStringLiteral("color: #f59e0b; font-size: 11px;"));
+    firewallPrivilegeLabel_->setStyleSheet(elevated ? successCss(11) : warningCss(11));
     layout->addWidget(firewallPrivilegeLabel_);
 
     auto *btnRow = new QHBoxLayout();
@@ -439,7 +484,7 @@ QWidget *SettingsPage::buildCardFirewall()
     btnRow->addWidget(applyFirewallBtn_);
 
     firewallStatusLabel_ = new QLabel(card);
-    firewallStatusLabel_->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    firewallStatusLabel_->setStyleSheet(mutedCss(11));
     btnRow->addWidget(firewallStatusLabel_);
     btnRow->addStretch();
     layout->addLayout(btnRow);
@@ -460,7 +505,7 @@ QWidget *SettingsPage::buildCardPublisher()
 
     auto *desc = new QLabel(
         QStringLiteral("用于把本地真实测速成功的节点发布到 Linux Web 后台，不会切换本地数据源。"), card);
-    desc->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    desc->setStyleSheet(mutedCss(11));
     layout->addWidget(desc);
 
     auto *form = new QFormLayout();
@@ -493,7 +538,7 @@ QWidget *SettingsPage::buildCardPublisher()
     btnRow->addWidget(checkRemoteBtn_);
 
     remoteApiStatusLabel_ = new QLabel(card);
-    remoteApiStatusLabel_->setStyleSheet(QStringLiteral("color: #888888; font-size: 11px;"));
+    remoteApiStatusLabel_->setStyleSheet(mutedCss(11));
     btnRow->addWidget(remoteApiStatusLabel_);
     btnRow->addStretch();
     layout->addLayout(btnRow);
@@ -518,7 +563,7 @@ QWidget *SettingsPage::buildBottomBar()
     layout->addWidget(reloadBtn);
 
     bottomSyncLabel_ = new QLabel(QStringLiteral("✓ 设置已保存并同步"), bar);
-    bottomSyncLabel_->setStyleSheet(QStringLiteral("color: #10b981; font-size: 11px;"));
+    bottomSyncLabel_->setStyleSheet(successCss(11));
     layout->addWidget(bottomSyncLabel_);
 
     layout->addStretch();
@@ -566,6 +611,7 @@ void SettingsPage::loadFromSettings()
     downloadTopNSpin_->setValue(currentSettings_.speedtestDownloadTopN);
 
     autoFailoverCheck_->setChecked(currentSettings_.autoFailover);
+    failoverProbeUrlsEdit_->setPlainText(currentSettings_.failoverProbeUrls);
     speedtestAutoRefillCheck_->setChecked(currentSettings_.speedtestAutoRefill);
     bandwidthGuardCheck_->setChecked(currentSettings_.bandwidthGuard);
     bandwidthMinSpin_->setValue(currentSettings_.bandwidthMinKbps);
@@ -604,6 +650,9 @@ bool SettingsPage::isDirty() const
     if (downloadTopNSpin_->value() != currentSettings_.speedtestDownloadTopN) return true;
 
     if (autoFailoverCheck_->isChecked() != currentSettings_.autoFailover) return true;
+    if (failoverProbeUrlsEdit_->toPlainText().trimmed() != currentSettings_.failoverProbeUrls) {
+        return true;
+    }
     if (speedtestAutoRefillCheck_->isChecked() != currentSettings_.speedtestAutoRefill) return true;
     if (bandwidthGuardCheck_->isChecked() != currentSettings_.bandwidthGuard) return true;
     if (bandwidthMinSpin_->value() != currentSettings_.bandwidthMinKbps) return true;
@@ -620,8 +669,7 @@ void SettingsPage::updateDirtyStatus()
 {
     const bool dirty = isDirty();
     const QString text = dirty ? QStringLiteral("⚠ 有未保存修改") : QStringLiteral("✓ 已同步");
-    const QString style = dirty ? QStringLiteral("color: #f59e0b; font-size: 11px;")
-                                : QStringLiteral("color: #10b981; font-size: 11px;");
+    const QString style = dirty ? warningCss(11) : successCss(11);
 
     headerSyncLabel_->setText(text);
     headerSyncLabel_->setStyleSheet(style);
@@ -649,6 +697,7 @@ void SettingsPage::saveSettings()
     patch.speedtestAddedSource = speedtestAddedSourceCheck_->isChecked();
     patch.speedtestDownload = speedtestDownloadCheck_->isChecked();
     patch.failoverLatencyMs = failoverLatencySpin_->value();
+    patch.failoverProbeUrls = failoverProbeUrlsEdit_->toPlainText().trimmed();
     patch.speedtestConcurrency = speedtestConcurrencySpin_->value();
     patch.speedtestTimeoutMs = speedtestTimeoutSpin_->value();
     patch.speedtestReuseMinutes = reuseMinutesSpin_->value();

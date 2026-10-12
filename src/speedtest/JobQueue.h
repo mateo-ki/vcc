@@ -40,8 +40,26 @@ public:
     JobQueue &operator=(const JobQueue &) = delete;
 
     /// 未收的作业达到并发上限时阻塞，直到有 worker 交回结果 —— 对应 Rust 的补任务循环。
+    ///
+    /// ⚠ 这里必须**顺手消费**已经交回的完成项：Rust 的节奏是「补到 concurrency 个就
+    /// join_next().await」。原来只 acquire 信号量就返回，applier 全堆到 waitAll 才执行 ——
+    /// 于是整轮测速的进度回调在跑完之前一个都到不了界面（15175 个节点时状态栏一直
+    /// 停在"已完成 0/15175"）。
     void submit(const Compute &compute)
     {
+        for (;;) {
+            int delivered = 0;
+            int outstanding = 0;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                delivered = delivered_;
+                outstanding = outstanding_;
+            }
+            if (delivered == 0 && outstanding < capacity_) {
+                break;
+            }
+            joinNext();      // 有结果就先在驱动线程上执行掉（applier 里会发进度回调）
+        }
         slots_.acquire();
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -62,6 +80,7 @@ public:
             }
             applier = std::move(appliers_.front());
             appliers_.pop_front();
+            --delivered_;
             --outstanding_;
         }
         applier();
@@ -109,6 +128,7 @@ private:
         {
             std::unique_lock<std::mutex> lock(mutex_);
             appliers_.push_back(std::move(applier));
+            ++delivered_;
         }
         cv_.notify_one();
         slots_.release();
@@ -121,6 +141,8 @@ private:
     std::condition_variable cv_;
     std::deque<Applier> appliers_;
     int outstanding_ = 0;
+    int delivered_ = 0;
+    /// 已交回但还没被驱动线程执行的完成项数量（submit 的"先消费再提交"看它）。
 };
 
 }

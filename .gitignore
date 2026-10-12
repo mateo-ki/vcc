@@ -7,3 +7,10 @@ build*/
 dist*/
 .idea/
 cmake-build*/
+
+# 运行时产物与本地草稿（发仓库前必须排除）：
+# data/ 里是下载的内核二进制（实测 59MB）与运行期数据库，tmp/ 是一次性诊断草稿。
+data/
+tmp/
+*.log
+tmp_mem*.ps1

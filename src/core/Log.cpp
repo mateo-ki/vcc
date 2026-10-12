@@ -21,7 +21,7 @@ QString tempFallbackPath()
 {
     const QString temp = QString::fromLocal8Bit(std::getenv("TEMP"));
     const QString base = temp.isEmpty() ? QDir::tempPath() : temp;
-    return QDir(base).filePath(QStringLiteral("vpn-parser-startup.log"));
+    return QDir(base).filePath(QStringLiteral("vcc-startup.log"));
 }
 
 bool appendLine(const QString &path, const QString &line)

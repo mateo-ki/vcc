@@ -381,7 +381,8 @@ Result<std::optional<Downloaded>> Collector::downloadCandidate(const Models::Sou
                                                                const FetchCandidate &candidate,
                                                                const QString &taskId,
                                                                qint64 budgetMs,
-                                                               qint64 headerBudgetMs) const
+                                                               qint64 headerBudgetMs,
+                                                               const Net::CancelToken &cancel) const
 {
     using Out = Result<std::optional<Downloaded>>;
 
@@ -399,6 +400,10 @@ Result<std::optional<Downloaded>> Collector::downloadCandidate(const Models::Sou
     request.url = candidate.url;
     request.method = QByteArrayLiteral("GET");
     request.timeoutMs = int(budgetMs);
+    // :442 —— Rust 的 `header_budget = budget.min(header_budget)` 只作用在"等响应头"上；
+    // 头一到，剩下的时间全给读体（每块 BODY_IDLE_TIMEOUT，整体仍是 budget）。
+    request.headerTimeoutMs = int(qMin(budgetMs, headerBudgetMs));
+    request.bodyIdleTimeoutMs = int(kBodyIdleTimeoutMs);
     // build_client：走代理时 CONNECT 隧道本身要几秒，直连的 3s 快速失败太紧（:109-112）。
     request.connectTimeoutMs = detail_->viaProxy ? int(kProxyConnectTimeoutMs)
                                                 : int(kConnectTimeoutMs);
@@ -406,6 +411,8 @@ Result<std::optional<Downloaded>> Collector::downloadCandidate(const Models::Sou
     request.maxRedirects = kMaxRedirects;
     request.followRedirects = true;
     request.proxyUrl = detail_->proxyUrl;
+    // 竞速时这条腿的可取消凭据（非竞速的调用方传空 → 不可取消，行为不变）。
+    request.cancel = cancel;
 
     // :442-451 —— 条件请求只对直连有意义：镜像的 ETag 语义不跟随上游。
     if (!candidate.mirror && sameAsSome(source.lastResolvedUrl, candidate.url)) {
@@ -419,15 +426,15 @@ Result<std::optional<Downloaded>> Collector::downloadCandidate(const Models::Sou
 
     // :452 —— Rust 的 `let header_budget = budget.min(header_budget);`
     const qint64 headerBudget = qMin(budgetMs, headerBudgetMs);
-    // 和 Rust 唯一的差别：Net::send 把"响应头"和"响应体"合成一次阻塞返回，没法只等头。
-    // 所以看门狗给到 header 预算 + 一个 BODY_IDLE_TIMEOUT（:31，Rust 读体的空闲上限）：
-    // 挂死的对端仍然只花十几秒而不是整个预算（:22-24 注释里的初衷），慢但活着的大订阅
-    // 也不会被 6s 掐死。超时文本里的秒数仍按 Rust 的 header_budget.as_secs()。
-    const qint64 deadlineMs = qMax<qint64>(qMin(budgetMs, headerBudget + kBodyIdleTimeoutMs), 1);
+    // 响应头和响应体各自的预算现在都写进了 request（Net::send 分段计时，和 Rust 的
+    // `timeout(header_budget, send())` + `chunk()` 空闲超时同一套），这里的外层
+    // deadline 只是"分离线程整体卡死"的保险，比 budget 晚一点、不参与正常判定。
+    const qint64 deadlineMs = qMax<qint64>(budgetMs + kTransportDeadlineSlackMs, 1);
 
     const SendOutcome sent = sendWithHeaderDeadline(request, deadlineMs);
     if (sent.timedOut) {
-        // :454-459
+        // :454-459 —— 只有分离线程整体卡死才会走到这里（正常情况下分段超时由
+        // Net::send 自己判定），文案仍按 Rust 的 header_budget.as_secs()。
         return Out::withError(Messages::format(Messages::responseHeaderTimeout(),
                                               {QString::number(headerBudget / 1000)}));
     }
@@ -436,6 +443,13 @@ Result<std::optional<Downloaded>> Collector::downloadCandidate(const Models::Sou
         // 错误文本做同一套判断（net/HttpClient.cpp:51 TimeoutError → "连接超时"，
         // :39 timeoutMs 兜底 → "请求超时"）。
         const QString error = sent.response.error();
+        if (error == Net::cancelledError()) {
+            // 竞速里赢家已经出现，这条腿是被主动放手的：既不是连接失败也不是超时，
+            // 原样把哨兵带回去，由 raceCandidates 决定"不进失败清单"。
+            // 注意取消只是让这条腿更早返回，外层 deadlineMs（budget + 2s 余量）的语义
+            // 一点没动 —— 它兜的仍然是"分离线程整体卡死"，包括不认取消的自定义 transport。
+            return Out::withError(Net::cancelledError());
+        }
         if (error == QStringLiteral("连接超时")) {
             // Rust 这条消息用的是常量 CONNECT_TIMEOUT，不是走代理时放宽的那个值。
             return Out::withError(Messages::format(
@@ -444,6 +458,18 @@ Result<std::optional<Downloaded>> Collector::downloadCandidate(const Models::Sou
         if (error == QStringLiteral("请求超时")) {
             return Out::withError(
                 QStringLiteral("request timeout after %1s").arg(budgetMs / 1000));
+        }
+        if (error == QStringLiteral("响应头超时")) {
+            // Rust 的 Elapsed 分支：头没到，压根没进读体阶段。
+            return Out::withError(Messages::format(Messages::responseHeaderTimeout(),
+                                                  {QString::number(headerBudget / 1000)}));
+        }
+        if (error.startsWith(QStringLiteral("response body idle"))) {
+            // Rust 的 read_source_body 空闲超时（:759-765）被 read_candidate 的调用点包成
+            // "read body failed (content-length=…)"；这里响应头已随错误一起丢了，只能报
+            // unknown（Rust 那边 content_length 是 Option，unknown 是它的合法取值之一）。
+            return Out::withError(
+                QStringLiteral("read body failed (content-length=unknown): %1").arg(error));
         }
         return Out::withError(QStringLiteral("request failed: %1").arg(error));
     }
@@ -503,11 +529,11 @@ Result<QByteArray> Collector::readSourceBody(const Net::Response &response, cons
     // :746-790 —— Rust 一边按 chunk 读（每块 BODY_IDLE_TIMEOUT、总量 MAX_SOURCE_BYTES）
     // 一边把 download_ms 回填给任务面板。Net::send 已经一次性把整个响应体带回来了，
     // 空闲超时折叠进 download_candidate 的看门狗，这里保留体积判断和耗时回填。
-    const std::optional<qint64> declared = declaredContentLength(response);
+    // 原来这里还有一句 body.reserve(min(declaredContentLength, kMaxSourceBytes))：
+    // `QByteArray body = response.body` 是隐式共享的浅拷贝，reserve 会立刻 detach 出
+    // 一份完整深拷贝 —— 64MB 的订阅正文在那一瞬间是双份。正文已经整个在内存里了，
+    // 预留容量没有任何收益。
     QByteArray body = response.body;
-    if (declared.has_value()) {
-        body.reserve(int(std::min<qint64>(declared.value(), kMaxSourceBytes)));
-    }
     if (qint64(body.size()) > kMaxSourceBytes) {
         // :770-775
         return Result<QByteArray>::withError(
@@ -546,6 +572,8 @@ Result<std::optional<Downloaded>> Collector::raceCandidates(
         Result<std::optional<Downloaded>> winner;
         QString winnerHost;
         QVector<QString> failures;
+        /// 每条已起跑的腿一份取消凭据；赢家出现后逐个 cancel（Rust 的 abort_all）。
+        QVector<Net::CancelToken> cancels;
     };
 
     auto state = std::make_shared<RaceState>();
@@ -555,36 +583,62 @@ Result<std::optional<Downloaded>> Collector::raceCandidates(
         const FetchCandidate leg = candidate;
         const Models::Source legSource = source;
         const QString legTaskId = taskId;
-        std::thread([collector, legSource, leg, legTaskId, budgetMs, headerBudgetMs, state]() {
+        auto cancel = std::make_shared<Net::CancelFlag>();
+        std::thread([collector, legSource, leg, legTaskId, budgetMs, headerBudgetMs, state,
+                     cancel]() {
             Result<std::optional<Downloaded>> outcome = Result<std::optional<Downloaded>>::withError(
                 QStringLiteral("request failed: candidate produced no result"));
-            try {
-                outcome = collector.downloadCandidate(legSource, leg, legTaskId, budgetMs,
-                                                     headerBudgetMs);
-            } catch (const std::exception &error) {
-                // :414 —— Rust 那边这是 join 错误（子任务 panic / 被取消）。
-                outcome = Result<std::optional<Downloaded>>::withError(Messages::format(
-                    Messages::candidateTaskFailed(), {},
-                    {{"{error}", QString::fromUtf8(error.what())}}));
-            } catch (...) {
-                outcome = Result<std::optional<Downloaded>>::withError(Messages::format(
-                    Messages::candidateTaskFailed(), {}, {{"{error}", QStringLiteral("unknown")}}));
+            // 起跑前赢家可能已经出现（腿是一条条 spawn 的）：那就连请求都不必发。
+            bool abandonedBeforeStart = false;
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                if (state->haveWinner) {
+                    abandonedBeforeStart = true;
+                } else {
+                    state->cancels.push_back(cancel);
+                }
+            }
+            if (!abandonedBeforeStart) {
+                try {
+                    outcome = collector.downloadCandidate(legSource, leg, legTaskId, budgetMs,
+                                                         headerBudgetMs, cancel);
+                } catch (const std::exception &error) {
+                    // :414 —— Rust 那边这是 join 错误（子任务 panic / 被取消）。
+                    outcome = Result<std::optional<Downloaded>>::withError(Messages::format(
+                        Messages::candidateTaskFailed(), {},
+                        {{"{error}", QString::fromUtf8(error.what())}}));
+                } catch (...) {
+                    outcome = Result<std::optional<Downloaded>>::withError(Messages::format(
+                        Messages::candidateTaskFailed(), {}, {{"{error}", QStringLiteral("unknown")}}));
+                }
             }
             std::lock_guard<std::mutex> lock(state->mutex);
             --state->running;
+            // 被主动取消的腿没有"失败"这回事：Rust 那边 abort 掉的任务根本不会返回结果，
+            // 把 "已取消" 记进 failures 会让"全失败"那条拼接文案里混进自己人。
+            const bool cancelled = outcome.isErr() && outcome.error() == Net::cancelledError();
             if (outcome.isOk()) {
                 if (!state->haveWinner) {
                     // 哪怕是 Ok(None)（304）也算这条腿答了。
                     state->haveWinner = true;
                     state->winner = std::move(outcome);
                     state->winnerHost = leg.host;
+                    // :404-407 —— abort_all：一锤定音之后其余腿立刻放手，别占着镜像闸（6）
+                    // 和同主机闸（2）继续跑完自己的 30s。
+                    for (const Net::CancelToken &other : state->cancels) {
+                        if (other != cancel) {
+                            other->cancel();
+                        }
+                    }
                 }
-            } else if (leg.mirror) {
-                // :409-413
-                state->failures.push_back(QStringLiteral("%1: %2").arg(leg.host, outcome.error()));
-            } else {
-                state->failures.push_back(Messages::format(Messages::directCandidatePrefix(), {},
-                                                           {{"{message}", outcome.error()}}));
+            } else if (!cancelled && !abandonedBeforeStart) {
+                if (leg.mirror) {
+                    // :409-413
+                    state->failures.push_back(QStringLiteral("%1: %2").arg(leg.host, outcome.error()));
+                } else {
+                    state->failures.push_back(Messages::format(Messages::directCandidatePrefix(), {},
+                                                               {{"{message}", outcome.error()}}));
+                }
             }
             state->condition.notify_all();
         }).detach();

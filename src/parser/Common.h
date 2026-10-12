@@ -19,7 +19,9 @@ const QRegularExpression& uriRegex();
 /// 对应 Rust 的 `LINE_URI_RE`：整行就是一条链接。
 const QRegularExpression& lineUriRegex();
 
-/// 展开订阅地址里的日期占位符：{Ymd} {ymd} {Y} {mm} {m} {dd} {d}（按 Rust 的替换顺序）。
+/// 展开订阅地址里的日期占位符。Rust 原版只有 {Ymd} {ymd} {Y} {mm} {m} {dd} {d}
+/// （parser/common.rs:20-42）；这里另外认它们的大小写别名 {YYYY} {yyyy} {M} {MM} {D} {DD}，
+/// 含义按"{Ymd}/{ymd}"那一套：大写年=4 位、小写年=2 位，月/日只换补零与否。
 QString expandUrlTemplate(const QString& text);
 
 /// \r\n / \r 统一成 \n，再按固定顺序还原 HTML 实体。

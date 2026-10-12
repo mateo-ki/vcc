@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Vcc VERSION 1.0.0 LANGUAGES CXX RC)
+project(Vcc VERSION 1.0.0 LANGUAGES CXX)
+
+# RC（资源脚本）只在 Windows 上有意义：Linux/macOS 上声明它会让 CMake 去找一个
+# 根本不存在的资源编译器。图标 .ico 也只进 Windows 的 vcc.rc。
+if(WIN32)
+    enable_language(RC)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,9 +58,27 @@ endif()
 
 function(vcc_target_options target)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /utf-8 /Zc:__cplusplus /permissive-)
+        target_compile_options(${target} PRIVATE /utf-8 /Zc:__cplusplus /permissive- /MP)
     endif()
     target_compile_definitions(${target} PRIVATE $<$<CONFIG:Debug>:VCC_DEBUG_BUILD>)
+
+    # 预编译头。判据是实测：改一个被 47 处包含的 src/core/Result.h 要重编 140 个
+    # TU + 66 次 AUTOMOC（--parallel 8 下 58s），而每个 TU 里最贵的就是那批 Qt/STL
+    # 头的重复解析。空目录退化成的 INTERFACE 目标没有源文件，不能给它挂 PCH。
+    get_target_property(_vcc_target_type ${target} TYPE)
+    if(NOT _vcc_target_type STREQUAL "INTERFACE_LIBRARY")
+        target_precompile_headers(${target} PRIVATE
+            <QString>
+            <QByteArray>
+            <QList>
+            <QVector>
+            <QSharedPointer>
+            <functional>
+            <memory>
+            <optional>
+            <vector>
+        )
+    endif()
 endfunction()
 
 add_subdirectory(src)

@@ -7,7 +7,7 @@
 #include "core/Log.h"
 #include "export/ClashProxy.h"
 #include "geo/GeoConstants.h"
-#include "proxy_probe/TestUrls.h"
+#include "proxy/TestUrls.h"
 
 namespace Proxy {
 
@@ -489,6 +489,43 @@ Result<Json> buildMihomoConfig(const Models::Node &node, MihomoConfigOptions opt
     }
 
     return Result<Json>::withValue(config);
+}
+
+Result<QString> MihomoConfigOptions::encodeHandoffConfig(const MihomoConfigOptions &options)
+{
+    const Result<QString> json = options.toSavedJsonText();
+    if (json.isErr()) {
+        return Result<QString>::withError(json.error());
+    }
+    QByteArray packed = json.value().toUtf8().toBase64();
+    packed.replace('+', "-");
+    packed.replace('/', "_");
+    while (packed.endsWith('=')) {
+        packed.chop(1);
+    }
+    return Result<QString>::withValue(QString::fromLatin1(packed));
+}
+
+Result<MihomoConfigOptions> MihomoConfigOptions::decodeHandoffConfig(const QString &encoded)
+{
+    QByteArray packed = encoded.toLatin1();
+    packed.replace('-', "+");
+    packed.replace('_', "/");
+    while (packed.size() % 4 != 0) {
+        packed.append('=');
+    }
+    const QByteArray json = QByteArray::fromBase64(packed);
+    if (json.isEmpty() && !encoded.isEmpty()) {
+        return Result<MihomoConfigOptions>::withError(QStringLiteral("invalid base64url payload"));
+    }
+    return MihomoConfigOptions::fromSavedJsonText(QString::fromUtf8(json));
+}
+
+MihomoConfigOptions configForUi(const MihomoConfigOptions &options)
+{
+    MihomoConfigOptions normalized = options;
+    normalized.urlTest = false;
+    return normalized;
 }
 
 }

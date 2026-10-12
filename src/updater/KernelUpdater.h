@@ -29,7 +29,7 @@ constexpr quint64 kMaxArchiveSize = 150ULL * 1024ULL * 1024ULL;
 /// 对应 Rust reqwest 客户端的 `user_agent("vpn-parser/0.1 kernel-updater")`。
 extern const QString kUserAgent;
 /// 对应 Rust `fetch_json` 里的 `.timeout(Duration::from_secs(8))`（整个请求）。
-constexpr int kReleaseTimeoutMs = 8000;
+constexpr int kReleaseTimeoutMs = 3500;
 /// 对应 Rust `stream_asset` 里的 `.timeout(Duration::from_secs(300))`。
 constexpr int kAssetTimeoutMs = 300000;
 /// 对应 Rust 客户端上的 `.connect_timeout(Duration::from_secs(4))`。

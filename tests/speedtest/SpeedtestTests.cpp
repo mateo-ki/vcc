@@ -10,16 +10,19 @@
 
 #include <QHostAddress>
 #include <QString>
+#include <QElapsedTimer>
 #include <QThread>
 #include <QTemporaryDir>
 #include <QVector>
 
 #include <atomic>
+#include <iostream>
 #include <set>
 
 #include "core/TimeUtil.h"
 #include "db/Database.h"
 #include "models/Node.h"
+#include "models/Settings.h"
 #include "models/Types.h"
 #include "speedtest/JobQueue.h"
 #include "speedtest/SpeedTester.h"
@@ -355,3 +358,128 @@ TEST(SpeedtestPort, JobQueueRunsComputesOffThreadAndAppliesOnDriver)
     EXPECT_EQ(applied.size(), jobs);
     EXPECT_EQ(appliersOnDriver, jobs);
 }
+
+/// 对应 Rust `gui/mod.rs:468 speed_opts()`：强度档同时改并发与超时，设置里那一组开关
+/// 必须原样带进这一轮测速。之前节点池三处入口各自手搓 `opt.timeoutMs = 5000`，
+/// 于是强度下拉框与 并发/超时/下载/常驻内核/并行内核/复用分钟/条件隔离 全被忽略 ——
+/// 他报的"点测速很慢"第一处就出在这里（默认档 Rust 是 1500ms，我们写死 5000ms）。
+TEST(SpeedtestPort, SpeedOptionsComeFromSettingsAndIntensity)
+{
+    Models::AppSettings settings;
+    settings.speedtestConcurrency = 128;
+    settings.speedtestTimeoutMs = 1500;
+    settings.speedtestDownload = true;
+    settings.downloadTestMs = 900;
+    settings.speedtestParallelKernels = true;
+    settings.speedtestPersistentKernel = true;
+    settings.speedtestReuseMinutes = 45;
+    settings.speedtestConditionalIsolation = true;
+    settings.speedtestDownloadTopN = 20;
+
+    using Speedtest::SpeedtestIntensity;
+    const Speedtest::SpeedTestOptions fast =
+        Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Fast);
+    EXPECT_EQ(fast.concurrency, 256);        // max(128, 256)
+    EXPECT_EQ(fast.timeoutMs, 800);          // min(1500, 800)
+
+    const Speedtest::SpeedTestOptions standard =
+        Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Standard);
+    EXPECT_EQ(standard.concurrency, 128);
+    EXPECT_EQ(standard.timeoutMs, 1500);
+
+    const Speedtest::SpeedTestOptions deep =
+        Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Deep);
+    EXPECT_EQ(deep.concurrency, 64);         // clamp(32, 128/2, 64)
+    EXPECT_EQ(deep.timeoutMs, 3500);         // max(1500, 3500)
+
+    // 开关是"照抄设置"，三档都一样。
+    for (const Speedtest::SpeedTestOptions *options : {&fast, &standard, &deep}) {
+        EXPECT_TRUE(options->measureDownload);
+        EXPECT_EQ(options->downloadTestMs, 900);
+        EXPECT_TRUE(options->parallelKernels);
+        EXPECT_TRUE(options->persistentKernel);
+        EXPECT_EQ(options->reuseVerifiedMinutes, 45);
+        EXPECT_TRUE(options->conditionalIsolation);
+        EXPECT_EQ(options->downloadTopN, 20);
+    }
+
+    // clamp 的两端都要拦住：并发太小不能被 Deep 档压成 0，太大不能被 Fast 档抬过。
+    settings.speedtestConcurrency = 10;
+    EXPECT_EQ(Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Deep).concurrency, 32);
+    EXPECT_EQ(Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Fast).concurrency, 256);
+    settings.speedtestConcurrency = 400;
+    EXPECT_EQ(Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Deep).concurrency, 64);
+    EXPECT_EQ(Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Fast).concurrency, 400);
+    // 标准档不许偷偷改用户的数。
+    EXPECT_EQ(Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Standard).concurrency, 400);
+    EXPECT_EQ(Speedtest::speedOptionsFor(settings, SpeedtestIntensity::Standard).timeoutMs, 1500);
+}
+
+/// JobQueue 必须**边提交边消费**完成项。原来 submit 只抢信号量就返回，applier 全堆到
+/// waitAll 才执行 —— 测速的进度回调都在 applier 里，于是 15175 个节点那一轮里状态栏
+/// 一直停在"已完成 0/15175"，跑完才瞬间跳到末尾（他 2026-10-12 报的第一条）。
+TEST(SpeedtestPort, JobQueueRunsAppliersWhileStillSubmitting)
+{
+    JobQueue queue(2);
+    std::atomic<int> executed{0};
+
+    for (int index = 0; index < 12; ++index) {
+        queue.submit([&executed]() {
+            QThread::msleep(15);
+            return [&executed]() { executed.fetch_add(1); };
+        });
+    }
+    const int duringSubmit = executed.load();
+    queue.waitAll();
+
+    EXPECT_EQ(executed.load(), 12) << "有作业没被执行完";
+    // 12 个作业 / 2 条 worker / 每个 15ms：submit 从第 3 个起就必须先消费一个完成项，
+    // 所以最后一次 submit 返回时至少该跑掉大半。取 4 是保守下限（旧行为是 0）。
+    std::cout << "appliers executed before waitAll: " << duringSubmit << " / 12" << std::endl;
+    EXPECT_GE(duringSubmit, 4)
+        << "最后一次 submit 返回时几乎没消费完成项 —— 进度会整轮憋到结束才爆发";
+}
+
+/// 「配置里的并发」和「同时在跑的探针数」是不是同一件事。
+///
+/// 这条不碰网络：直接问 JobQueue —— 测速整条链路（TCP 预筛、按 N 名补测下载、以及
+/// 每个内核泳道里的 JoinWindow）都建在它上面，`pool_.setMaxThreadCount(capacity)` 是
+/// 唯一保证"并发 256 就是 256 条线程在跑"的地方。256 个各睡 200ms 的作业：
+/// 真并发 → 墙钟 ≈ 200ms；要是实际只有 24 条线程，就是 ≈ 2.1 秒，一个数量级。
+/// （Rust 那侧是 tokio 任务，天生不受线程数限制 —— 这就是两边唯一可能的结构性差距。）
+TEST(SpeedtestPort, JobQueueRunsEveryConfiguredSlotInParallel)
+{
+    constexpr int jobs = 256;
+    constexpr int sleepMs = 200;
+
+    std::atomic<int> running{0};
+    std::atomic<int> peak{0};
+    JobQueue queue(jobs);
+    QElapsedTimer clock;
+    clock.start();
+    for (int index = 0; index < jobs; ++index) {
+        queue.submit([&running, &peak]() {
+            const int now = ++running;
+            // peak 必须用 CAS 循环更新：`store(max(load(), now))` 两条线程会互相覆盖。
+            int previous = peak.load();
+            while (now > previous
+                   && !peak.compare_exchange_weak(previous, now)) {
+            }
+            QThread::msleep(sleepMs);
+            --running;
+            return []() {};
+        });
+    }
+    queue.waitAll();
+    const qint64 elapsed = clock.elapsed();
+
+    std::cout << "jobqueue parallelism jobs=" << jobs << " peak=" << peak.load()
+              << " elapsed_ms=" << elapsed << std::endl;
+    EXPECT_GE(peak.load(), jobs / 2)
+        << "配置了 " << jobs << " 并发，实际同时在跑的最只有 " << peak.load() << " 条";
+    // 一轮的理论值是 sleepMs；给 3 轮 + 2s 的线程创建/调度余量。
+    EXPECT_LE(elapsed, sleepMs * 3 + 2000)
+        << jobs << " 个 " << sleepMs << "ms 的作业跑了 " << elapsed
+        << "ms —— 并发没真开起来";
+}
+

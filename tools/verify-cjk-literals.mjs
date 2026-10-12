@@ -42,6 +42,8 @@ function stripComments(text) {
 }
 
 const literals = new Set();
+// 文案本身不指出去重后的字面量在哪，200 条报错就没法按文件分派 —— 记一份代表文件。
+const origin = new Map();
 for (const file of walk(CPP_ROOT).filter((f) => /\.(h|cpp)$/.test(f))) {
   const text = stripComments(fs.readFileSync(file, 'utf8'));
   // 只找普通字面量（含 QStringLiteral / fromUtf8 / 裸串）。
@@ -55,6 +57,7 @@ for (const file of walk(CPP_ROOT).filter((f) => /\.(h|cpp)$/.test(f))) {
       continue;
     }
     literals.add(decoded);
+    if (!origin.has(decoded)) origin.set(decoded, file.replace(/\\/g, '/').split('/src/')[1]);
   }
 }
 
@@ -70,14 +73,21 @@ const missing = [];
 for (const literal of literals) {
   for (const segment of segments(literal)) {
     if (!rustNormalized.includes(segment)) {
-      missing.push({ literal, segment });
+      missing.push({ literal, segment, file: origin.get(literal) });
     }
   }
 }
 
 console.log(`checked ${literals.size} non-ASCII literal(s) in src/`);
-for (const { literal, segment } of missing) {
-  console.log(`NOT IN RUST SOURCE: ${JSON.stringify(segment)}  (来自 ${JSON.stringify(literal)})`);
+const byFile = new Map();
+for (const { file } of missing) {
+  byFile.set(file, (byFile.get(file) ?? 0) + 1);
+}
+for (const [file, count] of [...byFile].sort((a, b) => b[1] - a[1])) {
+  console.log(`  ${count} 段 ${file}`);
+}
+for (const { literal, segment, file } of missing) {
+  console.log(`NOT IN RUST SOURCE: ${JSON.stringify(segment)}  (${file} 来自 ${JSON.stringify(literal)})`);
 }
 if (missing.length && process.argv.includes('--update')) {
   // 只在"确实是我们自己写的新文案"时用这个模式，之后逐条审一下 allowlist。

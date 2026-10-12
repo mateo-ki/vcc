@@ -1,3 +1,6 @@
+// 基准站点列表的切分口径也住在这里（纯函数，跟着设置一起测）。
+#include "proxy/TestUrls.h"
+
 #include <gtest/gtest.h>
 
 #include "models/Settings.h"
@@ -43,6 +46,7 @@ TEST(AppSettings, DefaultsMatchRustStruct)
     EXPECT_EQ(settings.bandwidthMinKbps, 0);
     EXPECT_FALSE(settings.firewallAutoAllow);
     EXPECT_FALSE(settings.autoFailover);
+    EXPECT_TRUE(settings.failoverProbeUrls.isEmpty()) << "基准站点默认空 = 用内置的 Google 204";
     EXPECT_FALSE(settings.speedtestAutoRefill);
     // 这两条"软件自己动"的开关默认开。
     EXPECT_TRUE(settings.autoPrepareKernel);
@@ -75,4 +79,42 @@ TEST(UpdateSettings, OnlyPresentKeysAreApplied)
     // 未出现的键保持默认，不被顺带改写。
     EXPECT_EQ(settings.speedtestConcurrency, 128);
     EXPECT_TRUE(settings.autoPrepareKernel);
+}
+
+/// 基准站点：patch 里出现才改，没出现不许顺手动它；序列化要带得出去也收得回来。
+TEST(FailoverProbeUrls, patchAndRoundTrip)
+{
+    const Json patch = Json::parse(R"({"failover_probe_urls": "https://linux.do/"})");
+    Models::AppSettings settings;
+    Models::UpdateSettings::fromJson(patch).applyTo(settings);
+    EXPECT_EQ(settings.failoverProbeUrls.toStdString(), std::string("https://linux.do/"));
+    EXPECT_EQ(Json::parse(settings.toJson().dump())["failover_probe_urls"].is_string(), true);
+
+    Models::AppSettings again;
+    Models::UpdateSettings::fromJson(Models::UpdateSettings::fromJson(patch).toJson())
+        .applyTo(again);
+    EXPECT_EQ(again.failoverProbeUrls.toStdString(), std::string("https://linux.do/"));
+
+    Models::AppSettings untouched;
+    Models::UpdateSettings::fromJson(Json::parse(R"({"fetch_concurrency": 9})")).applyTo(untouched);
+    EXPECT_TRUE(untouched.failoverProbeUrls.isEmpty());
+}
+
+/// 设置里那段文本 -> 探测列表：去空白行、去首尾空格、按出现顺序去重；空 = 用内置那一条。
+TEST(ProbeBaselineUrls, splitsTrimsAndDedupes)
+{
+    const QString text = QStringList{
+        QStringLiteral("  https://a.test/  "),
+        QString(),
+        QStringLiteral("https://b.test/"),
+        QStringLiteral("https://a.test/"),
+        QStringLiteral("   "),
+    }.join(QChar(10));
+    const QStringList parsed = ProxyProbe::probeBaselineUrls(text);
+    ASSERT_EQ(parsed.size(), 2);
+    EXPECT_EQ(parsed.at(0).toStdString(), std::string("https://a.test/"));
+    EXPECT_EQ(parsed.at(1).toStdString(), std::string("https://b.test/"));
+    EXPECT_TRUE(ProxyProbe::probeBaselineUrls(QString()).isEmpty());
+    EXPECT_TRUE(ProxyProbe::probeBaselineUrls(
+        QStringList{QString(), QStringLiteral(" 	 ")}.join(QChar(10))).isEmpty());
 }

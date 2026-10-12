@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include "db/Database.h"
 
@@ -13,11 +14,10 @@ const char *kProductionDbEnv = "VCC_PRODUCTION_DB";
 
 QString productionDbPath()
 {
-    QString path = QString::fromLocal8Bit(qgetenv(kProductionDbEnv));
-    if (path.isEmpty()) {
-        path = QStringLiteral("D:/software/VPN Parser/data/vpn-parser.db");
-    }
-    return path;
+    // 只认环境变量：仓库里不留任何机器上的默认路径 —— 这条用例读的是**活库**，
+    // 拿默认值去猜一个真实安装目录，等于把别人的隐私路径写进公共代码，
+    // 而且换台机器还可能误读到一个不相干的库。没设就直接跳过。
+    return QString::fromLocal8Bit(qgetenv(kProductionDbEnv));
 }
 
 /// 连库带 -wal/-shm 一起复制：WAL 里可能还有未 checkpoint 的写入。
@@ -310,4 +310,118 @@ TEST(DatabaseProduction, ReadsRealRustDatabaseAndKeepsTimestampsByteIdentical)
         EXPECT_TRUE(parsed.value().contains("mixed_port"));
         EXPECT_TRUE(parsed.value().contains("routing_mode"));
     }
+}
+
+/// 连接池空闲回收（Rust 那边由 sqlx 的 idle_timeout 做：主库 60s、订阅分库 30s）。
+/// 不回收 = 34 源 × 2 条 SQLite 句柄（每条自带 ~2MB 页缓存）常驻，实测就是那 36MB。
+namespace {
+
+QString poolProbePath(const QTemporaryDir &directory, const QString &name)
+{
+    return QDir(directory.path()).filePath(name + QStringLiteral(".db"));
+}
+
+std::shared_ptr<ConnectionPool> makePool(const QString &path, int max, qint64 idleMs)
+{
+    Result<std::shared_ptr<ConnectionPool>> created = ConnectionPool::create(path, max, idleMs);
+    EXPECT_TRUE(created.isOk()) << created.error().toStdString();
+    return created.value();
+}
+
+void seedTable(ConnectionPool &pool)
+{
+    auto lease = pool.acquire();
+    ASSERT_TRUE(lease->execute(QStringLiteral("CREATE TABLE IF NOT EXISTS probe (x TEXT)")).isOk());
+    ASSERT_TRUE(lease->execute(QStringLiteral("DELETE FROM probe")).isOk());
+    ASSERT_TRUE(
+        lease->execute(QStringLiteral("INSERT INTO probe VALUES ('alive')")).isOk());
+}
+
+QString readProbe(ConnectionPool &pool)
+{
+    auto lease = pool.acquire();
+    Result<Statement> prepared = lease->prepare(QStringLiteral("SELECT x FROM probe"));
+    if (prepared.isErr()) {
+        return prepared.error();
+    }
+    Statement statement = prepared.takeValue();
+    const Result<bool> stepped = statement.step();
+    if (stepped.isErr() || !stepped.value()) {
+        return QStringLiteral("<no row>");
+    }
+    return statement.text(0);
+}
+
+}
+
+TEST(ConnectionPoolReap, idleConnectionsShrinkTheirCacheAndStayUsable)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const QString path = poolProbePath(directory, QStringLiteral("reap"));
+
+    auto pool = makePool(path, 3, /*idleTimeoutMs=*/40);
+    seedTable(*pool);
+    EXPECT_EQ(pool->maxConnections(), 3);
+    EXPECT_EQ(pool->shrunkConnections(), 0);
+
+    // 还没到空闲线：一条都不该动。
+    pool->reapIdle();
+    EXPECT_EQ(pool->shrunkConnections(), 0);
+
+    QThread::msleep(120);
+    pool->reapIdle();
+    EXPECT_EQ(pool->shrunkConnections(), 3);
+    // 关键：句柄都还在，读写照常（回收只缩页缓存，不改并发语义）。
+    EXPECT_EQ(pool->maxConnections(), 3);
+    EXPECT_EQ(readProbe(*pool), QStringLiteral("alive"));
+
+    // 用过的那条要重新计入，不能永远被当成已回收。
+    { auto lease = pool->acquire(); }
+    EXPECT_EQ(pool->shrunkConnections(), 2);
+
+    QThread::msleep(120);
+    pool->reapIdle();
+    EXPECT_EQ(pool->shrunkConnections(), 3);
+    EXPECT_EQ(readProbe(*pool), QStringLiteral("alive"));
+}
+
+TEST(ConnectionPoolReap, busyConnectionIsNeverShrunkUnderneathItsOwner)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto pool = makePool(poolProbePath(directory, QStringLiteral("busy")), 2, /*idleTimeoutMs=*/30);
+    seedTable(*pool);
+
+    {
+        auto lease = pool->acquire();
+        ASSERT_TRUE(lease->execute(QStringLiteral("PRAGMA user_version = 7")).isOk());
+        QThread::msleep(120);
+        pool->reapIdle();
+        // 借走的那条不动，另一条空闲超时可以。
+        EXPECT_EQ(pool->shrunkConnections(), 1);
+        // 借用者手里的连接依然可用（没被从下面抽走）。
+        Result<Statement> prepared = lease->prepare(QStringLiteral("PRAGMA user_version"));
+        ASSERT_TRUE(prepared.isOk()) << prepared.error().toStdString();
+        Statement statement = prepared.takeValue();
+        ASSERT_TRUE(statement.step().isOk());
+        EXPECT_EQ(statement.text(0), QStringLiteral("7"));
+    }
+    // 同池嵌套借两条是本仓库真实存在的调用形态：回收之后两条都必须还能借到（关槽会死锁）。
+    auto first = pool->acquire();
+    auto second = pool->acquire();
+    EXPECT_TRUE(first.isValid());
+    EXPECT_TRUE(second.isValid());
+}
+
+TEST(ConnectionPoolReap, zeroTimeoutKeepsEveryConnectionWarm)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto pool = makePool(poolProbePath(directory, QStringLiteral("noexpire")), 2, 0);
+    seedTable(*pool);
+    QThread::msleep(120);
+    pool->reapIdle();
+    EXPECT_EQ(pool->shrunkConnections(), 0);
+    EXPECT_EQ(readProbe(*pool), QStringLiteral("alive"));
 }

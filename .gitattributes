@@ -1,0 +1,4 @@
+# 只钉 shell 脚本的换行：core.autocrlf=true 会把 checkout 出来的文本转成 CRLF，
+# 而带 CRLF 的 .sh 在 Linux 上是 "bad interpreter"。其它文件一律不动，避免一次性
+# 改动整个仓库的行尾归一化。
+*.sh text eol=lf

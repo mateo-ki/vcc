@@ -3,7 +3,7 @@ import fs from 'node:fs';
 // 由 tools/gen-cjk-codepoints.mjs 改写，只服务 src/api/：
 // src/api/mod.rs 里的每条中文响应文本都要与 Rust 逐字一致（401/409/后台任务提示会
 // 直接显示给用户），所以这里也不允许手打——用 ASCII 锚点定位，附近找不到就报错退出。
-//   node src/api/gen-api-cjk.mjs
+//   node tools/gen-api-cjk.mjs
 const RUST = 'D:/project/rust/vs/vpn-parser/src';
 
 const target = {
@@ -86,7 +86,7 @@ for (const [name, file, anchor, occurrence, mode] of entries) {
 }
 
 const source = [
-  '// 由 src/api/gen-api-cjk.mjs 从 Rust 源生成，请勿手改。',
+  '// 由 tools/gen-api-cjk.mjs 从 Rust 源生成，请勿手改。',
   '// 这些文本是 HTTP API 的响应体，必须与 vpn-parser 的 Rust 实现逐字一致。',
   target.include,
   '',
@@ -107,7 +107,7 @@ const source = [
 ].join('\n');
 
 const header = [
-  '// 由 src/api/gen-api-cjk.mjs 生成，请勿手改（中文由码点数组拼出，防止转录丢字）。',
+  '// 由 tools/gen-api-cjk.mjs 生成，请勿手改（中文由码点数组拼出，防止转录丢字）。',
   '#pragma once',
   '',
   '#include <QString>',

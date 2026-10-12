@@ -23,6 +23,7 @@
 #include "kernel/KernelManager.h"
 #include "kernel/KernelTypes.h"
 #include "models/Node.h"
+#include "models/Settings.h"
 #include "parser/Common.h"
 #include "parser/Fingerprint.h"
 #include "proxy_probe/ProbeTypes.h"
@@ -166,6 +167,39 @@ QString intensityLabel(SpeedtestIntensity intensity)
         return Messages::deepLabel();
     }
     return Messages::standardLabel();
+}
+
+SpeedTestOptions speedOptionsFor(const Models::AppSettings &settings, SpeedtestIntensity intensity)
+{
+    // 逐行照 Rust `gui/mod.rs:468 speed_opts()`。档位同时改并发与超时：
+    // 快速档要"更宽并发 + 更短超时"，深度档相反（宁可慢，也要把慢节点测准）。
+    int concurrency = settings.speedtestConcurrency;
+    int timeoutMs = settings.speedtestTimeoutMs;
+    switch (intensity) {
+    case SpeedtestIntensity::Fast:
+        concurrency = qMax(settings.speedtestConcurrency, 256);
+        timeoutMs = qMin(settings.speedtestTimeoutMs, 800);
+        break;
+    case SpeedtestIntensity::Standard:
+        break;
+    case SpeedtestIntensity::Deep:
+        concurrency = qBound(32, settings.speedtestConcurrency / 2, 64);
+        timeoutMs = qMax(settings.speedtestTimeoutMs, 3500);
+        break;
+    }
+
+    SpeedTestOptions options;
+    options.concurrency = concurrency;
+    options.timeoutMs = timeoutMs;
+    options.measureDownload = settings.speedtestDownload;
+    options.downloadTestMs = settings.downloadTestMs;
+    options.intensity = intensity;
+    options.parallelKernels = settings.speedtestParallelKernels;
+    options.persistentKernel = settings.speedtestPersistentKernel;
+    options.reuseVerifiedMinutes = settings.speedtestReuseMinutes;
+    options.conditionalIsolation = settings.speedtestConditionalIsolation;
+    options.downloadTopN = settings.speedtestDownloadTopN;
+    return options;
 }
 
 QString intensityDescription(SpeedtestIntensity intensity)
@@ -452,7 +486,8 @@ Result<Models::SpeedTestSummary> SpeedTester::testAllSourcesGlobally(
                   .arg(totalNodes - qint64(representatives.size()))
                   .arg(qBound(1, options.concurrency, 512)));
 
-    const QElapsedTimer speedtestStarted;
+    QElapsedTimer speedtestStarted;
+    speedtestStarted.start();
     ProgressFn wrapped;
     if (progress) {
         wrapped = [this, taskId, sourceKeys, progress](const SpeedTestProgress &state) {
@@ -519,7 +554,8 @@ Result<Models::SpeedTestSummary> SpeedTester::testAllSourcesGlobally(
             results.append(copy);
         }
     }
-    const QElapsedTimer updateStarted;
+    QElapsedTimer updateStarted;
+    updateStarted.start();
     for (int offset = 0; offset < duplicateUpdates.size(); offset += kDbChunk) {
         const Status written =
             db_->updateNodeSpeedsBatch(duplicateUpdates.mid(offset, kDbChunk));
@@ -580,6 +616,10 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
         proxyNodes.insert(node.id, node);
     }
 
+    // 开局先报一拍：这一轮要测多少颗、耗时从 0 开始。不报的话，界面会停在点下去那句
+    // "正在测速订阅…"，而下面解析 + 预筛一整段都还没有任何回调 —— 看起来就像卡住了。
+    reportSpeedtestProgress(progress, SpeedTestPhase::TcpPrefilter, 0, total, 0, 0);
+
     const int concurrency = qBound(1, options.concurrency, 512);
     const qint64 prefilterMs = prefilterTimeoutMs(options);
     const qint64 proxyMs = proxyTimeoutMs(options);
@@ -591,31 +631,18 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
                   .arg(options.timeoutMs)
                   .arg(options.measureDownload ? 1 : 0));
 
-    const QElapsedTimer started;
+    QElapsedTimer started;
+    started.start();
 
-    // ---- 解析阶段：每个不同的 (host, port) 只查一次 ----
+    // ---- 解析：每个不同的 (host, port) 仍然只查一次，但**不再先做完整轮才开测** ----
+    // 原来这里有一道 resolver.waitAll() 栅栏：所有唯一 host 解析完才开始 TCP 预筛，
+    // 而栅栏期间一个进度回调都没有 —— 15175 个唯一节点时状态栏开局就停在
+    // "已完成 0/15175"好几分钟。resolveAddresses 走 QHostInfo::fromName（本线程
+    // getaddrinfo、不可取消，800ms 只是事后判定），域名节点一多就被放大。
+    // 现在改成惰性解析：memo 里没有就在这个节点的作业里自己查，结果由驱动线程在
+    // applier 里塞回 memo，后面的同 host 节点直接复用。这是对 Rust 的偏离
+    // （Rust 也是先解析完），但 Rust 那边同样有"开局静默几分钟"的表现。
     QHash<QString, ResolvedAddresses> resolved;
-    {
-        JobQueue resolver(concurrency);
-        QSet<QString> uniqueTargets;
-        for (const Models::Node &node : nodes) {
-            if (!HostUtil::isPublicProxyHost(node.server)) {
-                continue;
-            }
-            const QString key = targetKey(node.server, node.port);
-            if (uniqueTargets.contains(key)) {
-                continue;
-            }
-            uniqueTargets.insert(key);
-            const QString host = node.server;
-            resolver.submit([&resolver, &networkLimit, &resolved, host, key]() {
-                Permit permit(networkLimit);
-                const ResolvedAddresses outcome = resolveAddresses(host, kDnsLookupTimeoutMs);
-                return [&resolved, key, outcome]() { resolved.insert(key, outcome); };
-            });
-        }
-        resolver.waitAll();
-    }
 
     // ---- TCP 预筛 ----
     QVector<Models::LatencyResult> results;
@@ -632,16 +659,33 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
             const QString name = node.name;
             const QString host = node.server;
             const int port = node.port;
-            const ResolvedAddresses addresses = resolutionFor(resolved, host, port);
+            const QString dnsKey = targetKey(host, port);
+            // 只有真的要联网的 host 才查 DNS：私有/非法主机名过去也被这道 filter 挡在解析
+            // 阶段之外，保持一样（否则连 127.0.0.1 都会去走 QHostInfo —— 它要求有
+            // QCoreApplication 实例，无 GUI 的测试里会直接 Qt 断言）。
+            const bool needsDns = HostUtil::isPublicProxyHost(host) && port != 0;
+            const bool cached = needsDns && resolved.contains(dnsKey);
+            const ResolvedAddresses cachedAddresses = cached
+                ? resolved.value(dnsKey)
+                : resolutionFor(resolved, host, port);
             inflight.submit(
                 [&inflight, &networkLimit, &results, &done, &okCount, &progress,
-                 &started, total, id, name, host, port, prefilterMs, downloadTestMs,
-                 measureDownload, addresses]() {
+                 &started, &resolved, total, id, name, host, port, prefilterMs, downloadTestMs,
+                 measureDownload, dnsKey, needsDns, cached, cachedAddresses]() {
                     Permit permit(networkLimit);
+                    // 同 host 的多个节点会在同一批里并发提交，那时 memo 还没有值：
+                    // 允许重复查几次，换掉整轮静默的代价小得多。
+                    ResolvedAddresses addresses = cachedAddresses;
+                    if (needsDns && !cached) {
+                        addresses = resolveAddresses(host, kDnsLookupTimeoutMs);
+                    }
                     const ProbeOutcome outcome = SpeedTester::probeFullResolved(
                         host, port, int(prefilterMs), downloadTestMs, measureDownload, addresses);
-                    return [&results, &done, &okCount, &progress, &started, total, id, name, host,
-                            port, outcome]() {
+                    return [&results, &done, &okCount, &progress, &started, &resolved, total, id, name, host,
+                            port, dnsKey, needsDns, cached, addresses, outcome]() {
+                        if (needsDns && !cached) {
+                            resolved.insert(dnsKey, addresses);   // 只在驱动线程写
+                        }
                         Models::LatencyResult row;
                         row.id = id;
                         row.name = name;
@@ -763,6 +807,9 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
     const size_t proxyBatchSize =
         options.persistentKernel ? ProxyProbe::kPersistentMihomoBatchSize : kDefaultProxyBatchSize;
     const size_t proxyTotal = size_t(proxyCandidates.size());
+    // 换阶段也要报一拍：内核冷启动（下载/起进程/等端口）期间不会有逐节点回调。
+    reportSpeedtestProgress(progress, SpeedTestPhase::RealProxy, 0, proxyTotal, 0,
+                            started.elapsed());
     QVector<Models::Node> mihomoNodes;
     QVector<Models::Node> singBoxNodes;
     QVector<Models::Node> xrayNodes;
@@ -807,13 +854,47 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
                                {Kernel::Kind::Xray, xrayNodes}};
         QThreadPool kernelPool;
         kernelPool.setMaxThreadCount(3);
+        // 三条车道共用一份"各自已完成数"，谁完成一个节点就报一次三车道之和。
+        // 以前这里传的是空 ProgressFn，等于"开了并行内核测速就没有进度"，
+        // 状态栏那句会一直停在开头那一条。
+        struct LaneTally { size_t done = 0; size_t ok = 0; };
+        auto tally = std::make_shared<QVector<LaneTally>>(lanes.size());
+        auto tallyLock = std::make_shared<std::mutex>();
         QVector<QFuture<Result<QVector<ProxyProbe::ProbeResult>>>> futures;
-        for (Lane &lane : lanes) {
+        for (int laneIndex = 0; laneIndex < lanes.size(); ++laneIndex) {
+            Lane &lane = lanes[laneIndex];
+            ProxyProbe::ProgressFn laneProgress;
+            if (progress) {
+                laneProgress = [tally, tallyLock, laneIndex, proxyTotal, &started, &progress,
+                                laneKind = lane.kind](const ProxyProbe::ProbeProgress &p) {
+                    size_t done = 0;
+                    size_t ok = 0;
+                    {
+                        std::lock_guard<std::mutex> lock(*tallyLock);
+                        (*tally)[laneIndex] = LaneTally{p.done, p.ok};
+                        for (const LaneTally &one : *tally) {
+                            done += one.done;
+                            ok += one.ok;
+                        }
+                    }
+                    SpeedTestProgress state;
+                    state.phase = SpeedTestPhase::RealProxy;
+                    state.done = done;
+                    state.total = proxyTotal;
+                    state.ok = ok;
+                    state.fail = saturatingSub(done, ok);
+                    state.elapsedMs = started.elapsed();
+                    state.kernel = laneKind;
+                    state.batchIndex = p.batchIndex;
+                    state.batchTotal = p.batchTotal;
+                    progress(state);
+                };
+            }
             futures.append(QtConcurrent::run(
                 &kernelPool,
-                [&lane, &networkLimit, proxyMs, proxyBatchSize, &options]() {
+                [&lane, &networkLimit, proxyMs, proxyBatchSize, &options, laneProgress]() {
                     return ProxyProbe::verifyNodesWithKernel(
-                        lane.kind, lane.nodes, int(proxyMs), ProxyProbe::ProgressFn(), networkLimit,
+                        lane.kind, lane.nodes, int(proxyMs), laneProgress, networkLimit,
                         proxyBatchSize, options.conditionalIsolation);
                 }));
         }

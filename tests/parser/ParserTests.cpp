@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <QFile>
+#include <QDate>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -94,6 +95,46 @@ TEST(Parser, expand_date_template)
         Parser::expandUrlTemplate(QStringLiteral("https://example.com/{Ymd}-clash.yaml"));
     EXPECT_TRUE(url.contains(QStringLiteral("-clash.yaml")));
     EXPECT_FALSE(url.contains(QStringLiteral("{Ymd}")));
+}
+
+/// 大小写别名（他 2026-10-11 点名要的那 7 个）：规则沿用 {Ymd}/{ymd} 那一套 ——
+/// 大写年=4 位、小写年=2 位，月/日只差补零。这里按当天真实日期反推期望值，
+/// 所以任何一条写串了都会当场红，而不是等到某个模板 404 才发现。
+TEST(Parser, expand_date_template_case_aliases)
+{
+    const QDate today = QDate::currentDate();
+    const QString y4 = QStringLiteral("%1").arg(today.year(), 4, 10, QLatin1Char('0'));
+    const QString y2 = y4.right(2);
+    const QString m2 = QStringLiteral("%1").arg(today.month(), 2, 10, QLatin1Char('0'));
+    const QString d2 = QStringLiteral("%1").arg(today.day(), 2, 10, QLatin1Char('0'));
+    const QString m1 = QString::number(today.month());
+    const QString d1 = QString::number(today.day());
+
+    struct Case { const char *token; QString expects; };
+    const Case cases[] = {
+        {"Y", y4},   {"YYYY", y4}, {"y", y2},      {"yyyy", y2},
+        {"m", m1},   {"M", m1},    {"mm", m2},     {"MM", m2},
+        {"d", d1},   {"D", d1},    {"dd", d2},     {"DD", d2},
+        {"Ymd", y4 + m2 + d2}, {"ymd", y2 + m2 + d2},
+    };
+    for (const Case &one : cases) {
+        const QString out = Parser::expandUrlTemplate(
+            QStringLiteral("https://host/{%1}/sub").arg(QString::fromLatin1(one.token)));
+        EXPECT_EQ(out.toStdString(),
+                  (QStringLiteral("https://host/") + one.expects + QStringLiteral("/sub")).toStdString())
+            << one.token;
+    }
+
+    // 补零/不补零那两对只在单数字的月或日才看得出差别（跑测试这天两者恰好同值），
+    // 所以再钉两条与日期无关的形状，防止哪天把 {m} 直接接成 {mm} 也测不出来。
+    const QString bareMonth = Parser::expandUrlTemplate(QStringLiteral("{m}"));
+    const QString paddedMonth = Parser::expandUrlTemplate(QStringLiteral("{mm}"));
+    const QString bareDay = Parser::expandUrlTemplate(QStringLiteral("{d}"));
+    const QString paddedDay = Parser::expandUrlTemplate(QStringLiteral("{dd}"));
+    EXPECT_EQ(paddedMonth.size(), 2) << paddedMonth.toStdString();
+    EXPECT_EQ(paddedDay.size(), 2) << paddedDay.toStdString();
+    EXPECT_FALSE(bareMonth.startsWith(QLatin1Char('0'))) << bareMonth.toStdString();
+    EXPECT_FALSE(bareDay.startsWith(QLatin1Char('0'))) << bareDay.toStdString();
 }
 
 TEST(Parser, fingerprint_ignores_name)

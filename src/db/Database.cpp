@@ -12,6 +12,11 @@
 
 namespace {
 
+/// sqlx 侧的 idle_timeout（`db/mod.rs:49-53` 主库 60s、`db/mod.rs:131-135` 订阅分库 30s）。
+/// 每条 SQLite 连接自带 ~2MB 页缓存，不回收就是 34 源 × 2 条常驻。
+constexpr qint64 kMainPoolIdleTimeoutMs = 60 * 1000;
+constexpr qint64 kNodePoolIdleTimeoutMs = 30 * 1000;
+
 /// 只有真的不知道节点属于哪个源时才并发扫所有分库。
 struct PoolProbe {
     std::shared_ptr<ConnectionPool> pool;
@@ -29,7 +34,8 @@ Result<std::shared_ptr<Database>> Database::connect(const QString &dbPath)
             QStringLiteral("无法创建数据库目录 %1").arg(parent.absolutePath()));
     }
 
-    Result<std::shared_ptr<ConnectionPool>> mainPool = ConnectionPool::create(dbPath, 4);
+    Result<std::shared_ptr<ConnectionPool>> mainPool =
+        ConnectionPool::create(dbPath, 4, kMainPoolIdleTimeoutMs);
     if (mainPool.isErr()) {
         return Result<std::shared_ptr<Database>>::withError(
             QStringLiteral("连接 sqlite %1 失败: %2").arg(dbPath, mainPool.error()));
@@ -83,7 +89,8 @@ QString Database::nodeDbPath(const QString &sourceId) const
 
 Result<std::shared_ptr<ConnectionPool>> Database::connectNodePool(const QString &path)
 {
-    Result<std::shared_ptr<ConnectionPool>> pool = ConnectionPool::create(path, 2);
+    Result<std::shared_ptr<ConnectionPool>> pool =
+        ConnectionPool::create(path, 2, kNodePoolIdleTimeoutMs);
     if (pool.isErr()) {
         return Result<std::shared_ptr<ConnectionPool>>::withError(
             QStringLiteral("连接订阅库 %1 失败: %2").arg(path, pool.error()));
@@ -93,6 +100,24 @@ Result<std::shared_ptr<ConnectionPool>> Database::connectNodePool(const QString 
         return Result<std::shared_ptr<ConnectionPool>>::withError(migrated.error());
     }
     return pool;
+}
+
+void Database::reapIdlePools()
+{
+    QVector<std::shared_ptr<ConnectionPool>> pools;
+    {
+        QMutexLocker locker(&poolsMutex_);
+        if (main_) {
+            pools.append(main_);
+        }
+        for (auto it = nodePools_.constBegin(); it != nodePools_.constEnd(); ++it) {
+            pools.append(it.value());
+        }
+    }
+    // 锁外回收：reapIdle 自己会拿池内锁，别让 poolsMutex_ 套住一次磁盘句柄关闭。
+    for (const std::shared_ptr<ConnectionPool> &pool : pools) {
+        pool->reapIdle();
+    }
 }
 
 Result<std::shared_ptr<ConnectionPool>> Database::openNodePool(const QString &sourceId)

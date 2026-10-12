@@ -1,19 +1,30 @@
 #include <gtest/gtest.h>
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
+#include <QHash>
+#include <QImage>
 #include <QPushButton>
+#include <QLabel>
 #include <QFrame>
+#include <QPixmap>
+#include <QSize>
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QVBoxLayout>
+
+#include <algorithm>
+#include <cmath>
 
 #include "app/AppContext.h"
 #include "app/MainWindow.h"
 #include "core/TimeUtil.h"
 #include "db/Database.h"
+#include "gui/Icons.h"
 #include "gui/Theme.h"
 #include "gui/UiText.h"
+#include "speedtest/SpeedtestTypes.h"
 
 namespace {
 
@@ -41,7 +52,7 @@ TEST(GuiShell, windowMatchesRustNativeOptions)
     ASSERT_TRUE(context != nullptr);
 
     Gui::MainWindow window(*context);
-    EXPECT_EQ(window.windowTitle().toStdString(), std::string("VPN Parser"));
+    EXPECT_EQ(window.windowTitle().toStdString(), std::string("VCC"));
     // eframe NativeOptions：inner 1330x800，min 960x600。
     EXPECT_EQ(window.width(), 1330);
     EXPECT_EQ(window.height(), 800);
@@ -177,6 +188,263 @@ TEST(GuiShell, applyingThemeInstallsStylesheetForWholeApp)
     EXPECT_TRUE(card.graphicsEffect() == nullptr);
     // 深色那套（现在只剩浅色，这里是防御）。
     Gui::Theme::apply(QStringLiteral("soft-cobalt"));
+}
+
+/// 侧栏那两处间距（用户 2026-10-10：控制台离上面图标太近、图标左边也要留白）。
+/// 本机截不到图，所以直接量几何：图标左边缘的窗口坐标 = 侧栏 12px 内边距 + Rust
+/// 品牌行里的 add_space(8)，第一条导航项与图标之间必须留出 add_space(14)+分隔线
+/// +add_space(10) 那一段。
+TEST(GuiShell, sidebarKeepsBrandSpacingFromRust)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+
+    Gui::MainWindow window(*context);
+    window.resize(1200, 800);
+    window.show();
+    QCoreApplication::processEvents();
+
+    QLabel *logo = window.findChild<QLabel *>(QStringLiteral("BrandLogo"));
+    ASSERT_TRUE(logo != nullptr);
+    const QList<QPushButton *> navs = window.findChildren<QPushButton *>(QStringLiteral("Nav"));
+    ASSERT_FALSE(navs.isEmpty());
+
+    const QPoint logoAt = logo->mapTo(&window, QPoint(0, 0));
+    const QPoint firstNavAt = navs.first()->mapTo(&window, QPoint(0, 0));
+    const int gap = firstNavAt.y() - (logoAt.y() + logo->height());
+
+    EXPECT_GE(logoAt.x(), 20) << "图标左边没有留白";
+    EXPECT_GE(gap, 24) << "第一条导航项（控制台）贴着品牌行";
+
+    // 他要的"图标大一点、上下间距多一点"（对 Rust 32px/4px 的有意偏离）：钉住下限，
+    // 以后有人为了对齐 Rust 把它们缩回去，这里会红。
+    EXPECT_GE(logo->width(), 40) << "品牌图标被缩回 Rust 的 32px";
+    EXPECT_GE(logo->height(), 40) << "品牌图标被缩回 Rust 的 32px";
+    ASSERT_GE(navs.size(), 2);
+    const int navGap = navs.at(1)->mapTo(&window, QPoint(0, 0)).y()
+        - (navs.first()->mapTo(&window, QPoint(0, 0)).y() + navs.first()->height());
+    // 他这一轮要的是"上下菜单的间距小一点点"：10 → 6。钉成区间，既不许被人为了
+    // 对齐 Rust 的 4 压回零，也不许有人再把它加回松垮的 10。
+    // 间距他来回调过三次：10（"多一点"）→ 6（"小一点点"）→ 9（"再多点"）。
+    // 区间两头都拦：不许压回 Rust 的 3-4，也不许再涨回 10 以上。
+    EXPECT_GE(navGap, 8) << "导航条目之间的间距又被压小了";
+    EXPECT_LE(navGap, 10) << "导航条目间距又涨回松垮的那一档";
+}
+
+namespace {
+
+/// 图标是渲成位图的，所以断言只能落在像素上：有墨的像素数、最多的那一个实心色、
+/// 以及"哪些位置有墨"的形状指纹（五枚挂成同一枚时指纹会撞）。
+int inkCount(const QImage &image)
+{
+    int ink = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            if (qAlpha(line[x]) > 8) {
+                ++ink;
+            }
+        }
+    }
+    return ink;
+}
+
+QRgb dominantInk(const QImage &image)
+{
+    QHash<QRgb, int> counts;
+    for (int y = 0; y < image.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            if (qAlpha(line[x]) == 255) {
+                counts[line[x]] += 1;
+            }
+        }
+    }
+    QRgb best = 0;
+    int bestCount = 0;
+    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
+        if (it.value() > bestCount) {
+            bestCount = it.value();
+            best = it.key();
+        }
+    }
+    return best;
+}
+
+quint64 maskHash(const QImage &image)
+{
+    quint64 hash = 1469598103934665603ULL;
+    for (int y = 0; y < image.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            hash = (hash ^ quint64(qAlpha(line[x]) > 8 ? 1 : 0)) * 1099511628211ULL;
+        }
+    }
+    return hash;
+}
+
+/// 有墨像素的包围盒。它守的是"图标被裁掉一块"这一类：render() 里如果把 DPR 坐标算错，
+/// 图形会整块落到画布外，界面上只剩左上四分之一 —— 墨量、指纹、取色三条全都还是绿的
+/// （2026-10-10 他截图才发现）。包围盒宽度不到画布一半就是被裁了。
+QRect inkBounds(const QImage &image)
+{
+    QRect bounds;
+    for (int y = 0; y < image.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            if (qAlpha(line[x]) > 8) {
+                bounds |= QRect(x, y, 1, 1);
+            }
+        }
+    }
+    return bounds;
+}
+
+int channelSpread(QRgb left, QRgb right)
+{
+    return std::max({std::abs(qRed(left) - qRed(right)), std::abs(qGreen(left) - qGreen(right)),
+                     std::abs(qBlue(left) - qBlue(right))});
+}
+
+} // namespace
+
+/// Rust 的五条 nav_item 各带一枚矢量图标（views/sidebar.rs:61-65 的
+/// Icon::Dashboard / Lightning / Subscription / Gear / Plug）。这里钉三件事：挂的是不是
+/// 那五枚（顺序 + 互不相同）、有没有真的画出墨来、颜色是不是按 Rust nav_item 的
+/// "选中=accent / 未选中=sidebar_muted" 走，并且换主题会重渲。
+TEST(GuiShell, sidebarNavItemsCarryRustsFiveIcons)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+
+    Gui::Theme::apply(QStringLiteral("soft-teal"));
+    Gui::MainWindow window(*context);
+    window.show();
+    QCoreApplication::processEvents();
+
+    const QList<QPushButton *> items = window.findChildren<QPushButton *>(QStringLiteral("Nav"));
+    ASSERT_EQ(items.size(), 5);
+    const Gui::Theme::Palette first = Gui::Theme::current();
+
+    QVector<quint64> masks;
+    for (int index = 0; index < items.size(); ++index) {
+        QPushButton *button = items.at(index);
+        // kind 的取值就是 Icons::Kind 的枚举序（Dashboard=0…Plug=4），顺序抄 Rust。
+        ASSERT_TRUE(button->property("navIconKind").canConvert<int>())
+            << "第 " << index << " 条导航没有图标";
+        ASSERT_EQ(button->property("navIconKind").toInt(), index);
+        ASSERT_FALSE(button->icon().isNull());
+        const int iconEdge = Gui::Icons::kNavIconSize;
+        ASSERT_EQ(button->iconSize(), QSize(iconEdge, iconEdge))
+            << "导航图标尺寸和 Icons::kNavIconSize 不一致";
+
+        // 按 dpr 取图：`pixmap(size)` 那个重载只会给你 size 那么大的设备像素（DPR 变 1），
+        // 要验"高清渲染"必须走 pixmap(size, devicePixelRatio)。
+        const QPixmap pixmap = button->icon().pixmap(QSize(iconEdge, iconEdge), 2.0);
+        ASSERT_EQ(pixmap.devicePixelRatio(), 2.0);
+        ASSERT_EQ(pixmap.width(), iconEdge * 2);
+        const QImage image = pixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+        ASSERT_GE(inkCount(image), 40) << "第 " << index << " 枚图标几乎是空的";
+        // 墨的包围盒必须落在画布正中：DPR 坐标一算错，图形会整块偏到某个角
+        // （被裁成左上四分之一时包围盒中心在 25% 处，这条直接红）。
+        const QRect bounds = inkBounds(image);
+        const qreal wantX = image.width() / 2.0, wantY = image.height() / 2.0;
+        ASSERT_LE(std::abs(bounds.center().x() - wantX), image.width() * 0.08)
+            << "第 " << index << " 枚图标的墨偏了：bbox=" << bounds.x() << ".." << bounds.right()
+            << " 画布宽 " << image.width();
+        ASSERT_LE(std::abs(bounds.center().y() - wantY), image.height() * 0.08)
+            << "第 " << index << " 枚图标的墨偏了：bbox=" << bounds.y() << ".." << bounds.bottom()
+            << " 画布高 " << image.height();
+        masks.push_back(maskHash(image));
+
+        const QRgb expected = button->isChecked() ? first.accent.rgba() : first.sidebarMuted.rgba();
+        EXPECT_LE(channelSpread(dominantInk(image), expected), 2)
+            << "第 " << index << " 枚图标的颜色没跟着选中态走";
+    }
+    for (int left = 0; left < masks.size(); ++left) {
+        for (int right = left + 1; right < masks.size(); ++right) {
+            EXPECT_NE(masks.at(left), masks.at(right)) << "第 " << left << " 与 " << right
+                                                      << " 条挂的是同一枚图标";
+        }
+    }
+
+    // 五套主题只有强调色不同（sidebarMuted 是中性色派生的，跨主题一样），所以"换主题
+    // 要重渲图标"这条只能拿选中那枚来验：它的色必须跟着新主题的 accent 走。
+    Gui::Theme::apply(QStringLiteral("soft-cobalt"));
+    QCoreApplication::processEvents();
+    const Gui::Theme::Palette second = Gui::Theme::current();
+    ASSERT_NE(second.accent.rgba(), first.accent.rgba());
+    {
+        const QImage image = items.first()->icon().pixmap(QSize(Gui::Icons::kNavIconSize, Gui::Icons::kNavIconSize), 2.0).toImage()
+                                 .convertToFormat(QImage::Format_ARGB32);
+        EXPECT_LE(channelSpread(dominantInk(image), second.accent.rgba()), 2)
+            << "切主题后选中的导航图标还留着上一个主题的强调色";
+    }
+
+    // 选中态一变，两枚图标的颜色要立刻换角色（Rust 的 nav_item 每次重绘都重新取色）。
+    items.at(1)->setChecked(true);
+    QCoreApplication::processEvents();
+    const QImage selected = items.at(1)->icon().pixmap(QSize(Gui::Icons::kNavIconSize, Gui::Icons::kNavIconSize), 2.0).toImage()
+                                .convertToFormat(QImage::Format_ARGB32);
+    const QImage idle = items.first()->icon().pixmap(QSize(Gui::Icons::kNavIconSize, Gui::Icons::kNavIconSize), 2.0).toImage()
+                            .convertToFormat(QImage::Format_ARGB32);
+    EXPECT_LE(channelSpread(dominantInk(selected), second.accent.rgba()), 2)
+        << "刚被选中的导航项没有换成 accent";
+    EXPECT_LE(channelSpread(dominantInk(idle), second.sidebarMuted.rgba()), 2)
+        << "被取消选中的导航项没有退回 sidebar_muted";
+    Gui::Theme::apply(QStringLiteral("soft-teal"));
+}
+
+/// 拉完自动测速的判据：开关关着不测；开着但这次一个节点都没解析出来也不测
+/// （对着空池跑一轮测速只会让状态条转几十秒）。
+TEST(GuiShell, autoSpeedtestOnlyFiresWhenEnabledAndNodesArrive)
+{
+    EXPECT_FALSE(Gui::MainWindow::shouldAutoSpeedtest(false, 354));
+    EXPECT_FALSE(Gui::MainWindow::shouldAutoSpeedtest(true, 0));
+    EXPECT_FALSE(Gui::MainWindow::shouldAutoSpeedtest(true, -1));
+    EXPECT_TRUE(Gui::MainWindow::shouldAutoSpeedtest(true, 1));
+}
+
+/// 底部状态栏那颗「测速全部」必须跟着节点池的强度下拉框走。Rust 全应用只有
+/// 一个 `speedtest_intensity`，每一条测速入口都从同一个 `speed_opts()` 取参数；
+/// 我们这边一旦把它钉成默认档，同一句「测速全部」就会在两个入口用两个超时 ——
+/// 表现正是"vpn-parser 测得到的节点，vcc 测不到"（他那些 Cloudflare Worker 型
+/// 出口冷启动实测 3.1–4.9 秒，2500ms 的标准档必挂）。
+TEST(GuiShell, bottomBarTestAllFollowsTheNodesPageIntensityKnob)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+
+    Gui::MainWindow window(*context);
+    QComboBox *knob = nullptr;
+    const QList<QComboBox *> boxes = window.findChildren<QComboBox *>();
+    for (QComboBox *box : boxes) {
+        if (box->count() == 3
+            && box->itemData(0).toInt() == int(Speedtest::SpeedtestIntensity::Fast)
+            && box->itemData(2).toInt() == int(Speedtest::SpeedtestIntensity::Deep)) {
+            knob = box;
+            break;
+        }
+    }
+    ASSERT_TRUE(knob != nullptr) << "找不到那颗测速强度下拉框，这条测试就没在守任何东西";
+
+    knob->setCurrentIndex(2);
+    const Speedtest::SpeedTestOptions deep = window.speedtestAllOptions();
+    EXPECT_EQ(deep.intensity, Speedtest::SpeedtestIntensity::Deep);
+    EXPECT_GE(deep.timeoutMs, 3500);
+
+    knob->setCurrentIndex(0);
+    const Speedtest::SpeedTestOptions fast = window.speedtestAllOptions();
+    EXPECT_EQ(fast.intensity, Speedtest::SpeedtestIntensity::Fast);
+    EXPECT_LE(fast.timeoutMs, 800);
+
+    EXPECT_GT(deep.timeoutMs, fast.timeoutMs);
 }
 
 int main(int argc, char *argv[])

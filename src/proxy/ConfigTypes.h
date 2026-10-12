@@ -158,7 +158,16 @@ void applyMihomoDnsPoisonOverrides(QVector<TrafficRule> &rules);
 /// 便捷构造：Quic 变体忽略 value。
 TrafficRule makeRule(RuleMatcher::Kind kind, const QString &value, RuleAction action);
 
-QVector<TrafficRule> recommendedTrafficRules();QVector<TrafficRule> gfwlistTrafficRules();
+QVector<TrafficRule> recommendedTrafficRules();
+QVector<TrafficRule> gfwlistTrafficRules();
+
+/// 规则自动最优（vcc 独有，Rust 要人工点"推荐分流规则→确认覆盖"）：
+/// - 规则表为空 → 直接给推荐的 15 条（含 `GEOSITE,cn,DIRECT`/`GEOIP,CN`/私网块）。
+/// - 规则表非空但缺兜底 → 把缺的那几条**追加到末尾**，用户自己的规则一条不动、顺序不变。
+/// 为什么需要：`MATCH,PROXY` 兜底之下，规则表里如果没有中国大陆直连那一段，B 站这类
+/// 国内站会整站绕海外节点（实测过：慢 3 倍、吞吐被限在节点那 3.5 MB/s）。
+/// 结果是 `optimizeTrafficRules` 的产物（幂等：再跑一次不会变）。
+QVector<TrafficRule> withMissingFallbackRules(const QVector<TrafficRule> &rules);
 QVector<TrafficRule> aiServiceRules();
 QVector<TrafficRule> streamingMediaRules();
 QVector<TrafficRule> socialTelegramRules();

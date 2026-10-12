@@ -24,6 +24,9 @@ enum class Preference {
 
 /// serde 的 snake_case 取值：kernel_kind / preference 在 JSON 里长这样。
 QString kindToText(Kind kind);
+/// 给用户看的名字（对应 Rust `KernelKind::display_name`，kernel/mod.rs:46）。
+/// 与 kindToText 不同：那个是 serde 取值（sing_box），这个是界面写法（Sing-box）。
+QString displayName(Kind kind);
 Kind kindFromText(const QString &text);
 QString preferenceToText(Preference preference);
 Preference preferenceFromText(const QString &text);

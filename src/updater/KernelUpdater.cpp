@@ -30,7 +30,7 @@ using Kernel::Messages::compatModeSuffix;
 using Kernel::Messages::directTransport;
 using Kernel::UpdateStage;
 
-const QString kUserAgent = QStringLiteral("vpn-parser/0.1 kernel-updater");
+const QString kUserAgent = QStringLiteral("vcc/0.1 kernel-updater");
 
 namespace {
 

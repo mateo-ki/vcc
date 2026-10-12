@@ -58,7 +58,7 @@ Result<QByteArray> downloadInto(const QString &proxyUrl, const QString &url, con
     Net::Request request;
     request.url = url;
     request.method = QByteArrayLiteral("GET");
-    request.userAgent = QStringLiteral("vpn-parser geo-updater");
+    request.userAgent = QStringLiteral("vcc geo-updater");
     request.connectTimeoutMs = 6000;
     request.timeoutMs = 180000;
     request.proxyUrl = proxyUrl;

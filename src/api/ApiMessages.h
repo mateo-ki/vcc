@@ -1,4 +1,4 @@
-// 由 src/api/gen-api-cjk.mjs 生成，请勿手改（中文由码点数组拼出，防止转录丢字）。
+// 由 tools/gen-api-cjk.mjs 生成，请勿手改（中文由码点数组拼出，防止转录丢字）。
 #pragma once
 
 #include <QString>

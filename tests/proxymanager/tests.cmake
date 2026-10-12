@@ -3,7 +3,7 @@
 qt_add_executable(vccProxyManagerTests proxymanager/ProxyManagerTests.cpp)
 target_include_directories(vccProxyManagerTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(vccProxyManagerTests PRIVATE
-    vccProxy vccKernelConfig vccKernel vccCore vccModels Qt6::Core Qt6::Network
+    vccProxy vccKernelConfig vccKernel vccCore vccModels Qt6::Core Qt6::Network Qt6::Concurrent
     GTest::gtest)
 vcc_target_options(vccProxyManagerTests)
 add_test(NAME vccProxyManagerTests COMMAND vccProxyManagerTests)

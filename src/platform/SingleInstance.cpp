@@ -82,7 +82,10 @@ Result<std::optional<SingleInstanceGuard>> acquireSingleInstanceForHandoff()
     // 轮询等待最多 3 秒，拿到互斥量并接管，确保系统中永远由唯一的活动实例持有互斥量。
     std::optional<SingleInstanceGuard> guard;
     for (const HandoffPollStep &step : handoffPollPlan()) {
-        Result<std::optional<SingleInstanceGuard>> attempt = acquireSingleInstance();
+        // 用不带唤醒的那条：这一轮等的是"父进程正在退出并释放锁"，去唤醒/掀它的窗口
+        // 只会把一个马上要消失的窗口重新拉到前台（白框的另一半来源）。
+        Result<std::optional<SingleInstanceGuard>> attempt =
+            acquireSingleInstanceNamed(singleInstanceMutexName());
         if (attempt.isErr()) {
             return attempt;
         }

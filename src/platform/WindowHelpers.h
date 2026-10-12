@@ -45,4 +45,9 @@ bool skipsWindowClass(const QString &className);
 /// 两个入参把 Win32 的返回值翻成 bool，方便脱离 user32 测试。
 bool windowIsAlreadyShown(bool visible, bool iconic);
 
+/// 这条窗口是不是"用户意义上的应用窗口"。有标题栏、且不是 tool / 不抢焦点的那种才算。
+/// Qt 每个进程还带几条隐藏辅助顶层窗口（ThemeChangeObserver / ScreenChangeObserver /
+/// IME / MSCTFIME UI），把它们当主窗口 ShowWindow+TOPMOST 就是凭空多出的白色空框。
+bool windowIsAppWindow(bool hasCaption, bool toolWindow, bool noActivate);
+
 }

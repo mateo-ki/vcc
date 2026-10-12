@@ -4,6 +4,9 @@
 
 namespace Gui {
 
-Page::Page(App::AppContext &context, QWidget *parent) : QWidget(parent), context_(context) {}
+Page::Page(App::AppContext &context, QWidget *parent) : QWidget(parent), context_(context)
+{
+    setAttribute(Qt::WA_StyledBackground, true);
+}
 
 }

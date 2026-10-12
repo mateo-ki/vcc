@@ -134,7 +134,9 @@ TEST(PlatformProcessControl, OrphanCoreImageNamesComeFromKernelExecutableNames)
 
     EXPECT_TRUE(isDuplicateAppImage(QStringLiteral("vpn-parser.exe")));
     EXPECT_TRUE(isDuplicateAppImage(QStringLiteral("VPN-Parser.EXE")));
-    EXPECT_FALSE(isDuplicateAppImage(QStringLiteral("vcc.exe")));
+    EXPECT_TRUE(isDuplicateAppImage(QStringLiteral("vcc.exe")));
+    EXPECT_TRUE(isDuplicateAppImage(QStringLiteral("VCC.EXE")));
+    EXPECT_FALSE(isDuplicateAppImage(QStringLiteral("other.exe")));
 }
 
 // ---- Rust mod.rs: job_creation_does_not_capture_the_app_process ----
@@ -201,11 +203,11 @@ TEST(PlatformFirewall, RuleNamesAreStableAndPrefixed)
     // 路径不变、exe 变了（每次重编译）→ 规则名也不变，这正是"按路径放行"的意义。
     EXPECT_EQ(name, Firewall::ruleName(QStringLiteral("E:\\other\\place\\vpn-parser.exe")));
     EXPECT_TRUE(Firewall::ruleName(QStringLiteral("/x/mihomo.exe")).contains(QStringLiteral("mihomo")));
-    // "VPN Parser" + " · " + stem：分隔符是 U+00B7，两边各一个空格。
-    EXPECT_EQ(name.size(), 23);
-    EXPECT_EQ(name.at(11), QChar(0x00B7));
-    EXPECT_EQ(Firewall::ruleName(QStringLiteral("no-suffix")), QStringLiteral("VPN Parser · no-suffix"));
-    EXPECT_EQ(Firewall::ruleName(QStringLiteral("D:/x/")), QStringLiteral("VPN Parser · program"));
+    // "VCC" + " · " + stem：分隔符是 U+00B7，两边各一个空格。
+    EXPECT_EQ(name.size(), 16);
+    EXPECT_EQ(name.at(4), QChar(0x00B7));
+    EXPECT_EQ(Firewall::ruleName(QStringLiteral("no-suffix")), QStringLiteral("VCC · no-suffix"));
+    EXPECT_EQ(Firewall::ruleName(QStringLiteral("D:/x/")), QStringLiteral("VCC · program"));
 }
 
 TEST(PlatformFirewall, NetshArgumentsKeepProgramPathAsOneToken)
@@ -242,10 +244,10 @@ TEST(PlatformFirewall, ExistsCheckUsesLossyUtf8SoNonAsciiSeparatorNeverMatches)
     // 于是"已存在就跳过"实际上认不出来 —— 这就是 Rust 的真实行为（规则每次都会被重新 add，
     // 包括 exe 路径换掉的那次）。这边逐字照抄，不顺手"修好"，否则判据就和 Rust 不一致了。
     QByteArray gbk;
-    gbk += name.left(11).toUtf8();
+    gbk += name.left(4).toUtf8();
     gbk.append('\xA1');
     gbk.append('\xA4');
-    gbk += name.mid(12).toUtf8();
+    gbk += name.mid(5).toUtf8();
     EXPECT_FALSE(Firewall::ruleExistsFromOutput(gbk, name));
 }
 
@@ -266,8 +268,8 @@ TEST(PlatformFirewall, FailureEntriesAndMissingPathsFollowRust)
 TEST(PlatformTray, WireConstantsMatchRust)
 {
     EXPECT_EQ(trayWindowClass(), QStringLiteral("VPNParserTrayWindowClass"));
-    EXPECT_EQ(mainWindowTitle(), QStringLiteral("VPN Parser"));
-    EXPECT_EQ(wakeupMessageName(), QStringLiteral("VPN_PARSER_SHOW_WINDOW_MSG"));
+    EXPECT_EQ(mainWindowTitle(), QStringLiteral("VCC"));
+    EXPECT_EQ(wakeupMessageName(), QStringLiteral("VCC_SHOW_WINDOW_MSG"));
     EXPECT_EQ(wakeupInstanceId(), 0x400u + 101u);   // WM_USER + 101
     EXPECT_EQ(trayCallbackMessage(), 0x400u + 100u); // WM_USER + 100
     EXPECT_EQ(trayIconId(), 1001u);
@@ -328,10 +330,10 @@ TEST(PlatformTray, ClickEventPredicatesFollowRust)
 
 TEST(PlatformTray, TooltipTextAndCapacityFollowRust)
 {
-    // Rust 写死的默认提示 "VPN Parser - 网络代理控制台"：20 个字符，前 13 个是 ASCII。
+    // 默认提示 "VCC - 网络代理控制台"：13 个字符，前 6 个是 ASCII。
     const QString tip = defaultTrayTooltip();
-    EXPECT_EQ(tip.size(), 20);
-    EXPECT_EQ(tip.left(13), QStringLiteral("VPN Parser - "));
+    EXPECT_EQ(tip.size(), 13);
+    EXPECT_EQ(tip.left(6), QStringLiteral("VCC - "));
     // szTip 在现代 SDK 是 WCHAR[128]，Rust 用 szTip.len() - 1 截断。
     EXPECT_EQ(trayTipCapacity(), 127);
     const QString long_ = QString(200, QLatin1Char('x'));
@@ -365,4 +367,16 @@ TEST(PlatformTray, TrayHandleLifecycleAndUpdatesWithoutShowingAnIcon)
     tray.shutdown();
     tray.shutdown();
     EXPECT_FALSE(tray.tryRecvEvent().has_value());
+}
+
+/// 白窗口守卫：只有带标题栏、且不是 tool / 不抢焦点的窗口才允许被"恢复 / 掀到前台"。
+/// Qt 每个进程带几条隐藏辅助顶层窗口（ThemeChangeObserver / ScreenChangeObserver /
+/// IME / MSCTFIME UI），它们全都缺这三项里的至少一项，所以必须在筛子外面 ——
+/// 2026-10-12 那次"两个白窗口卡住"就是被 ShowWindow(SW_SHOW)+HWND_TOPMOST 掀出来的。
+TEST(WindowHelpers, onlyRealAppWindowsMayBeRestored)
+{
+    EXPECT_TRUE(Platform::windowIsAppWindow(true, false, false));
+    EXPECT_FALSE(Platform::windowIsAppWindow(false, false, false)) << "无标题栏 = Qt 的观察者窗口";
+    EXPECT_FALSE(Platform::windowIsAppWindow(true, true, false));
+    EXPECT_FALSE(Platform::windowIsAppWindow(true, false, true));
 }

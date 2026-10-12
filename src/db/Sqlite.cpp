@@ -215,9 +215,15 @@ Result<std::unique_ptr<Connection>> Connection::open(const QString &path)
     }
 
     auto connection = std::unique_ptr<Connection>(new Connection(handle, path));
-    for (const char *pragma : {"PRAGMA journal_mode=WAL",
+    // busy_timeout 必须排在 journal_mode 前面：`PRAGMA journal_mode=WAL` 是要拿一次
+    // 独占锁的 pragma，超时没设之前它遇到并发写就是立刻 SQLITE_BUSY（默认超时 0）。
+    // 实测症状：订阅库刚被 collector 写完，GUI 立刻去开同一份分库，约 3~4 次里 1 次
+    // 报 "PRAGMA journal_mode=WAL 失败: database is locked"，节点池于是整个是空的。
+    // Rust 那边 busy_timeout 是 SqliteConnectOptions 的一部分（db/mod.rs:44-47），
+    // 由 sqlx 在建连接时先设好再切 journal_mode，所以碰不到这个。
+    for (const char *pragma : {"PRAGMA busy_timeout=10000",
+                               "PRAGMA journal_mode=WAL",
                                "PRAGMA synchronous=NORMAL",
-                               "PRAGMA busy_timeout=10000",
                                "PRAGMA cache_size=-2000"}) {
         const Status status = connection->execute(QLatin1String(pragma));
         if (status.isErr()) {

@@ -13,7 +13,7 @@
 #include "proxy/XrayConfig.h"
 #include "proxy_probe/JoinWindow.h"
 #include "proxy_probe/ProbeKernel.h"
-#include "proxy_probe/TestUrls.h"
+#include "proxy/TestUrls.h"
 
 namespace ProxyProbe {
 namespace {
@@ -104,7 +104,7 @@ Result<QVector<ProbeResult>> probeBatchWithXray(const QString &binary,
     const quint16 readyPort = plan.value().readyPort;
     reservations.release();
 
-    Result<TempWorkDir> created = TempWorkDir::create(QStringLiteral("vpn-parser-xray-probe"));
+    Result<TempWorkDir> created = TempWorkDir::create(QStringLiteral("vcc-xray-probe"));
     if (created.isErr()) {
         return Result<QVector<ProbeResult>>::withError(created.error());
     }

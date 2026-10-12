@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 // 由 router.rs 抽取中文/箭头字面量，生成纯 ASCII 的 C++ 码点表：
-//   node src/router/gen-router-cjk.mjs
+//   node tools/gen-router-cjk.mjs
 // 选路决策的 reason 会进界面和日志，必须与 Rust 逐字一致，所以不允许手打。
 // 每条用一个 ASCII 锚点定位，再在附近几行里找那个非 ASCII 字面量；
 // 找到 0 个或多个就报错退出，绝不猜。

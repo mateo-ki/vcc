@@ -11,7 +11,7 @@
 #include "core/Result.h"
 #include "kernel/KernelTypes.h"
 #include "models/Node.h"
-#include "proxy_probe/TestUrls.h"
+#include "proxy/TestUrls.h"
 
 namespace ProxyProbe {
 

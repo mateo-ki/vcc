@@ -83,6 +83,12 @@ struct MihomoConfigOptions {
     static Result<MihomoConfigOptions> fromSavedJsonText(const QString &jsonText);
     /// 对应 `Database::update_proxy_config`：先校验再序列化。
     Result<QString> toSavedJsonText() const;
+
+    /// 提权交接用的配置编码。Rust 是 `URL_SAFE_NO_PAD.encode(serde_json(options))`，
+    /// 解码端在 main.rs —— 两端必须同一套字符表，所以这里一起搬：标准 base64 之后
+    /// `+`→`-`、`/`→`_`、去掉尾部 `=`。
+    static Result<QString> encodeHandoffConfig(const MihomoConfigOptions &options);
+    static Result<MihomoConfigOptions> decodeHandoffConfig(const QString &encoded);
 };
 
 struct ProxyRuntimeStatus {
@@ -112,5 +118,12 @@ Result<Json> buildMihomoConfig(const Models::Node &node, MihomoConfigOptions opt
 
 /// 错误文本是否表示"节点连不通"（而不是启动失败之类的其它问题）。
 bool isNodeConnectivityFailure(const QString &message);
+
+/// 代理配置进入 UI 状态的唯一入口（对应 Rust gui 的 `set_proxy_config`）。
+/// 界面上已经没有「自动选路 url-test」开关（2026-10-06 按用户要求撤掉，理由是他那边内核
+/// url-test 经常网络不稳定），所以从运行时/库里读到的 `true` 一律归成 `false`：留一条
+/// 没有开关可关的路径，等于让旧存值悄悄决定行为。生成层的 url-test 分支保留，要恢复
+/// 只需把开关画回动作条。
+MihomoConfigOptions configForUi(const MihomoConfigOptions &options);
 
 }

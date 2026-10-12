@@ -188,8 +188,9 @@ TEST(Geo, ProvisionReportsAlreadyReadyWithoutDownloading)
 /// 不写不删；文件不在（换台机器）就跳过。
 TEST(Geo, RealInstalledAssetsPassTheChecks)
 {
-    const QString dir = QStringLiteral("D:/software/VPN Parser/data/kernels/mihomo");
-    if (!QFileInfo(QDir(dir).filePath(Geo::kGeoFiles.at(0))).exists()) {
+    // 目录由环境变量给（VCC_REAL_ASSET_DIR）：仓库里不写死任何机器上的装机路径。
+    const QString dir = QString::fromLocal8Bit(qgetenv("VCC_REAL_ASSET_DIR"));
+    if (dir.isEmpty() || !QFileInfo(QDir(dir).filePath(Geo::kGeoFiles.at(0))).exists()) {
         GTEST_SKIP() << "no real assets on this machine";
     }
     EXPECT_TRUE(Geo::geoReady(dir));

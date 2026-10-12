@@ -205,3 +205,62 @@ TEST(RuleMatcherJson, UsesAdjacentTagAndContentShape)
     EXPECT_EQ(restored.kind, RuleMatcher::Kind::GeoIp);
     EXPECT_EQ(restored.value.toStdString(), std::string("CN"));
 }
+
+namespace {
+
+bool hasRule(const QVector<TrafficRule> &rules, RuleMatcher::Kind kind, const QString &value,
+             RuleAction action)
+{
+    for (const TrafficRule &rule : rules) {
+        if (rule.matcher.kind == kind && rule.matcher.value == value && rule.action == action) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}
+
+/// 规则自动最优（vcc 独有）：这三条钉住的是"B 站整站绕海外"那类事故的兜底。
+TEST(AutoOptimalRules, emptyRuleListGetsTheRecommendedBlock)
+{
+    const QVector<TrafficRule> seeded = withMissingFallbackRules({});
+    EXPECT_EQ(seeded.size(), recommendedTrafficRules().size());
+    EXPECT_TRUE(hasRule(seeded, RuleMatcher::Kind::GeoSite, QStringLiteral("cn"), RuleAction::Direct));
+    EXPECT_TRUE(hasRule(seeded, RuleMatcher::Kind::GeoIp, QStringLiteral("CN"), RuleAction::Direct));
+    EXPECT_TRUE(hasRule(seeded, RuleMatcher::Kind::DomainSuffix, QStringLiteral("home.arpa"),
+                        RuleAction::Direct));
+}
+
+TEST(AutoOptimalRules, onlyTheMissingFallbacksAreAppendedAndUserOrderSurvives)
+{
+    // 模拟库里已有的东西：两条自己的规则，没有任何中国大陆直连兜底。
+    const QVector<TrafficRule> stored = {
+        makeRule(RuleMatcher::Kind::DomainSuffix, QStringLiteral("gitee.com"), RuleAction::Direct),
+        makeRule(RuleMatcher::Kind::DomainSuffix, QStringLiteral("x.com"), RuleAction::Proxy),
+    };
+    const QVector<TrafficRule> fixed = withMissingFallbackRules(stored);
+
+    EXPECT_TRUE(hasRule(fixed, RuleMatcher::Kind::GeoSite, QStringLiteral("cn"), RuleAction::Direct));
+    EXPECT_TRUE(hasRule(fixed, RuleMatcher::Kind::IpCidr, QStringLiteral("10.0.0.0/8"),
+                        RuleAction::Direct));
+    // 用户自己的两条还在，而且顺序没动（追加只在末尾）。
+    EXPECT_EQ(fixed.first().matcher.value.toStdString(), std::string("gitee.com"));
+    EXPECT_EQ(fixed.at(1).matcher.value.toStdString(), std::string("x.com"));
+    EXPECT_LT(fixed.size(), 2 + recommendedTrafficRules().size() + 1)
+        << "推荐的条目应该被 optimize 合并掉重复的，不是整段照抄";
+}
+
+TEST(AutoOptimalRules, itIsIdempotent)
+{
+    const QVector<TrafficRule> stored = {
+        makeRule(RuleMatcher::Kind::DomainSuffix, QStringLiteral("gitee.com"), RuleAction::Direct),
+    };
+    const QVector<TrafficRule> once = withMissingFallbackRules(stored);
+    const QVector<TrafficRule> twice = withMissingFallbackRules(once);
+    EXPECT_EQ(once.size(), twice.size());
+    for (int index = 0; index < once.size(); ++index) {
+        EXPECT_EQ(once.at(index).matcher.value.toStdString(), twice.at(index).matcher.value.toStdString());
+        EXPECT_EQ(once.at(index).action, twice.at(index).action);
+    }
+}

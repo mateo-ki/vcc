@@ -1,4 +1,4 @@
-// 由 src/api/gen-api-cjk.mjs 从 Rust 源生成，请勿手改。
+// 由 tools/gen-api-cjk.mjs 从 Rust 源生成，请勿手改。
 // 这些文本是 HTTP API 的响应体，必须与 vpn-parser 的 Rust 实现逐字一致。
 #include "api/ApiMessages.h"
 

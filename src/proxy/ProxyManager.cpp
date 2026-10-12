@@ -1,5 +1,9 @@
 #include "proxy/ProxyManager.h"
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
@@ -22,7 +26,7 @@
 #include "platform/ProcessControl.h"
 #include "proxy/Diagnostics.h"
 #include "proxy/SystemProxySession.h"
-#include "proxy_probe/TestUrls.h"
+#include "proxy/TestUrls.h"
 #include "sysproxy/TerminalProxy.h"
 
 // sing-box / xray 的配置生成由并行的移植任务提供。
@@ -57,13 +61,57 @@ bool connectToLocalPort(quint16 port, int timeoutMs)
 
 bool childRunning(QProcess *child)
 {
-    return child && child->state() != QProcess::NotRunning;
+    if (!child) {
+        return false;
+    }
+#ifdef Q_OS_WIN
+    const qint64 pid = child->processId();
+    if (pid <= 0) {
+        return false;
+    }
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (!h) {
+        return false;
+    }
+    DWORD exitCode = 0;
+    const BOOL ok = GetExitCodeProcess(h, &exitCode);
+    CloseHandle(h);
+    return ok && exitCode == STILL_ACTIVE;
+#else
+    if (child->thread() != QThread::currentThread()) {
+        return true;
+    }
+    return child->state() != QProcess::NotRunning;
+#endif
 }
 
 /// 对应 Rust 的 `child.try_wait()`：返回"已经退出"这一事实。
 bool childHasExited(QProcess *child, QString *exitText)
 {
     if (!child) {
+        return false;
+    }
+#ifdef Q_OS_WIN
+    const qint64 pid = child->processId();
+    if (pid <= 0) {
+        return true;
+    }
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (!h) {
+        return true;
+    }
+    DWORD exitCode = 0;
+    const BOOL ok = GetExitCodeProcess(h, &exitCode);
+    CloseHandle(h);
+    if (ok && exitCode == STILL_ACTIVE) {
+        return false;
+    }
+    if (exitText != nullptr) {
+        *exitText = QStringLiteral("exit status: %1").arg(exitCode);
+    }
+    return true;
+#else
+    if (child->thread() != QThread::currentThread()) {
         return false;
     }
     if (child->state() == QProcess::Running) {
@@ -76,6 +124,7 @@ bool childHasExited(QProcess *child, QString *exitText)
                         .arg(child->exitCode(), 8, 16, QLatin1Char('0'));
     }
     return true;
+#endif
 }
 
 Status killChild(QProcess *child)
@@ -83,13 +132,49 @@ Status killChild(QProcess *child)
     if (!child) {
         return Status::succeeded();
     }
-    if (child->state() == QProcess::Running) {
-        child->kill();
+#ifdef Q_OS_WIN
+    const qint64 pid = child->processId();
+    if (pid > 0) {
+        HANDLE hProcess = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+        if (hProcess) {
+            TerminateProcess(hProcess, 0);
+            WaitForSingleObject(hProcess, 3000);
+            CloseHandle(hProcess);
+        }
     }
-    if (!child->waitForFinished(3000)) {
-        return Status::failed(QStringLiteral("等待退出失败"));
+#else
+    if (child->thread() == QThread::currentThread()) {
+        if (child->state() == QProcess::Running) {
+            child->kill();
+        }
+        child->waitForFinished(3000);
     }
+#endif
     return Status::succeeded();
+}
+
+void safeDeleteProcess(QProcess *raw)
+{
+    if (!raw) {
+        return;
+    }
+    if (raw->thread() == QThread::currentThread()) {
+        delete raw;
+    } else if (qApp != nullptr && raw->thread() == qApp->thread()) {
+        QMetaObject::invokeMethod(qApp, [raw]() { delete raw; }, Qt::QueuedConnection);
+    } else if (qApp != nullptr) {
+        // 拥有它的是某条 QtConcurrent 池线程。那种线程从不 exec() 事件循环，所以
+        // deleteLater() 永远不会被投递 —— 每检测一次"内核已退出"（换节点、崩溃、stop）
+        // 就漏一个 QProcess 连带它的管道句柄和合并输出缓冲。
+        // 正确做法是把删除动作放到 GUI 线程上做：先在那边把对象改属主，再删。
+        // 走到这里之前已经 kill + waitForFinished，进程状态是 NotRunning，没人再碰它。
+        QMetaObject::invokeMethod(qApp, [raw]() {
+            raw->moveToThread(qApp->thread());
+            delete raw;
+        }, Qt::QueuedConnection);
+    } else {
+        delete raw;   // 没有 QApplication（纯命令行探针/单测）：调用线程就是唯一读者
+    }
 }
 
 /// 内核日志全文（诊断只取最后一行或 msg= 片段，不需要截断）。
@@ -217,7 +302,8 @@ ProxyRuntimeStatus ProxyManager::status()
         }
         QString exitText;
         if (runtime_.child && childHasExited(runtime_.child.get(), &exitText)) {
-            runtime_.child.reset();
+            auto *raw = runtime_.child.release();
+            safeDeleteProcess(raw);
             const QString message = kernelName(runtime_.status.kernel)
                 + QStringLiteral(" 已退出: ") + exitText;
             runtime_.status.state =
@@ -261,6 +347,9 @@ void ProxyManager::markFailed(Runtime &runtime, const QString &message)
 
 void ProxyManager::setFailed(const QString &message)
 {
+    // 同样是取证通道：内核选择/找不到可执行文件这两条在这一层就返回了，够不到
+    // startWithPath 里那条 fail 日志。
+    Log::warn(QStringLiteral("proxy start refused: %1").arg(message));
     QMutexLocker locker(&runtimeMutex_);
     runtime_.status.state = ProxyState::Failed;
     runtime_.status.message = message;
@@ -293,7 +382,7 @@ Result<bool> ProxyManager::putConfigs(const QString &configPath, const QString &
     request.url = QStringLiteral("http://127.0.0.1:%1/configs?force=true").arg(controllerPort);
     request.method = QByteArrayLiteral("PUT");
     request.timeoutMs = 1500;
-    request.userAgent = QStringLiteral("vpn-parser/1.0");
+    request.userAgent = QStringLiteral("vcc/1.0");
     if (!controllerSecret.isEmpty()) {
         request.headers.append({QStringLiteral("Authorization"),
                                 QStringLiteral("Bearer %1").arg(controllerSecret)});
@@ -458,24 +547,27 @@ Status ensurePortAvailable(quint16 port)
 }
 
 /// 经本地 mixed 端口真取一次 generate_204：必须是 204 才算通。
-Status verifyLocalProxy(quint16 port, int timeoutMs)
+Status verifyLocalProxyAgainst(quint16 port, const QString &url, int timeoutMs)
 {
     QElapsedTimer clock;
     clock.start();
     QStringList lastErrors;
+    // Rust 侧 STARTUP_PROXY_VERIFY_URLS 只有这一条，且只认 204：多加一条 URL 或放过
+    // 200 都会让"节点其实不通"被判成通（例如出口被透明网关改写成登录页 200）。
     while (clock.elapsed() < timeoutMs) {
         const qint64 remaining = timeoutMs - clock.elapsed();
         if (remaining <= 0) {
             break;
         }
-        const int attemptTimeout = static_cast<int>(std::min<qint64>(remaining, 900));
+        const int attemptTimeout =
+            static_cast<int>(std::min<qint64>(remaining, kVerifyAttemptTimeoutMs));
         Net::Request request;
-        request.url = ProxyProbe::kProxyConnectivityTestUrl;
+        request.url = url;
         request.method = QByteArrayLiteral("GET");
         request.timeoutMs = attemptTimeout;
-        request.connectTimeoutMs = 600;
+        request.connectTimeoutMs = kVerifyAttemptConnectTimeoutMs;
         request.proxyUrl = QStringLiteral("http://127.0.0.1:%1").arg(port);
-        request.userAgent = QStringLiteral("vpn-parser/1.0");
+        request.userAgent = QStringLiteral("vcc/1.0");
         const Result<Net::Response> response = Net::send(request);
         if (response.isOk() && response.value().status == 204) {
             return Status::succeeded();
@@ -491,13 +583,18 @@ Status verifyLocalProxy(quint16 port, int timeoutMs)
         if (left <= 0) {
             break;
         }
-        sleepMs(static_cast<int>(std::min<qint64>(left, 40)));
+        sleepMs(static_cast<int>(std::min<qint64>(left, kVerifyAttemptRetrySleepMs)));
     }
     if (lastErrors.isEmpty()) {
         lastErrors.append(QStringLiteral("验证超过 %1 ms").arg(timeoutMs));
     }
     return Status::failed(QStringLiteral("本地代理无法访问测试地址: %1")
                               .arg(lastErrors.join(QStringLiteral("；"))));
+}
+
+Status verifyLocalProxy(quint16 port, int timeoutMs)
+{
+    return verifyLocalProxyAgainst(port, ProxyProbe::kProxyConnectivityTestUrl, timeoutMs);
 }
 
 Status ProxyManager::startWithKernelPath(const Models::Node &node, Kernel::Kind kernel,
@@ -564,7 +661,13 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
         options = runtime_.options;
     }
 
-    auto fail = [this](const QString &message) -> Status {
+    // startup.log 是这件事唯一的取证通道：Rust 只在界面上给失败原因，而界面那句会被下一次
+    // 点击覆盖成"正在启动 %kernel%"，事后什么都查不到（2026-10-10 他报的"点节点卡在启动中"
+    // 就是这么查无对证的）。"阶段完成"有日志，"阶段失败"也必须有。
+    auto fail = [this, &startupClock](const QString &message) -> Status {
+        Log::warn(QStringLiteral("proxy start failed, elapsed_ms=%1: %2")
+                      .arg(startupClock.elapsed())
+                      .arg(message));
         QMutexLocker locker(&runtimeMutex_);
         markFailed(runtime_, message);
         return Status::failed(message);
@@ -660,8 +763,23 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
     child->setArguments(arguments);
     child->setProcessChannelMode(QProcess::MergedChannels);
     child->setStandardOutputFile(logPath, QIODevice::Append);
+    // 端口就绪/连通性验证的预算**从这一刻**算，不从 startWithPath 入口算。
+    // 2026-10-10 新装的包第一次启动点节点：geo 库要现下载、三颗内核
+    // 同时在自动装，入口到 spawn 之间就吃掉了 47.5s —— 用整体预算的话
+    // `kStartupTotalTimeoutMs - elapsed` 已经是 0，wait_for_port 一毫秒都不等就直接报
+    // "Mihomo 启动后端口 9980 未就绪"，是个假故障。Rust 那边 deadline 也是在建配置之前
+    // 起的（proxy/mod.rs:759-760 vs :777 的 provision），同样会被冷启动打穿 —— 这一处
+    // 是有意的修正，不是移植漏了。
+    QElapsedTimer readyClock;
+    readyClock.start();
     child->start();
     if (!child->waitForStarted(5000)) {
+        // 界面上那句照 Rust 原样，这里多记一条取证：2026-10-10 22:37-22:45 那一段就是
+        // "配置每 4.26 秒重生成一次、一次都没出现 process_spawned"，光靠 UI 文案分不出
+        // 是路径为空、cwd 不对，还是内核 exe 真不在 —— 记下解析到的路径和当前目录就能定。
+        Log::warn(QStringLiteral("kernel spawn failed: program=%1, cwd=%2, error=%3")
+                      .arg(executablePath.isEmpty() ? QStringLiteral("<empty>") : executablePath,
+                           QDir::currentPath(), child->errorString()));
         workDir->cleanup();
         const QString message = QStringLiteral("启动 %1 失败: %2")
                                     .arg(Kernel::kindDisplayName(kernel), child->errorString());
@@ -677,7 +795,7 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
     }
 
     for (const quint16 port : ports) {
-        const qint64 elapsed = startupClock.elapsed();
+        const qint64 elapsed = readyClock.elapsed();
         const int remaining =
             static_cast<int>(std::max<qint64>(0, kStartupTotalTimeoutMs - elapsed));
         if (!waitForPort(child.get(), port, remaining)) {
@@ -701,7 +819,7 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
 
     if (kVerifyConnectivityOnStart) {
         const qint64 remaining =
-            std::max<qint64>(0, kStartupTotalTimeoutMs - startupClock.elapsed());
+            std::max<qint64>(0, kStartupTotalTimeoutMs - readyClock.elapsed());
         const qint64 reserve = options.mode == ProxyMode::System
                 && !activeSysProxy.has_value()
             ? kStartupSystemProxyReserveMs
@@ -751,6 +869,9 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
                 runtime_.status.message =
                     QStringLiteral("%1 运行中（初次连接自动建立中）")
                         .arg(Kernel::kindDisplayName(kernel));
+                if (qApp != nullptr && child->thread() == QThread::currentThread()) {
+                    child->moveToThread(qApp->thread());
+                }
                 runtime_.child = std::move(child);
                 runtime_.workDir = std::move(workDir.value());
                 return Status::succeeded();
@@ -777,14 +898,19 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
                     activeSysProxy = activated.value();
                 }
             }
-            // 本地端口已就绪但外部不通：内核继续跑，进入降级状态，系统代理不还原。
+            // 与 Rust 一致：内核进程活着、本地端口已就绪，但外部连通性没验证通过 ——
+            // 这就是"降级运行"，必须把失败原因留在 lastError 里（API 的节点故障归类
+            // isNodeConnectivityFailure 也靠这个串），不能报成"运行中"骗界面。
             QMutexLocker locker(&runtimeMutex_);
             runtime_.systemProxySnapshot = activeSysProxy;
             runtime_.status.state = ProxyState::Degraded;
             runtime_.status.systemProxyEnabled = runtime_.systemProxySnapshot.has_value();
             runtime_.status.lastError = message;
-            runtime_.status.message =
-                QStringLiteral("%1 降级运行: %2").arg(Kernel::kindDisplayName(kernel), message);
+            runtime_.status.message = QStringLiteral("%1 降级运行: %2")
+                                          .arg(Kernel::kindDisplayName(kernel), message);
+            if (qApp != nullptr && child->thread() == QThread::currentThread()) {
+                child->moveToThread(qApp->thread());
+            }
             runtime_.child = std::move(child);
             runtime_.workDir = std::move(workDir.value());
             return Status::succeeded();
@@ -795,7 +921,7 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
     }
 
     if (options.mode == ProxyMode::System) {
-        if (startupClock.elapsed() >= kStartupTotalTimeoutMs) {
+        if (readyClock.elapsed() >= kStartupTotalTimeoutMs) {
             killChild(child.get());
             workDir->cleanup();
             const QString message = QStringLiteral("%1 启动超过 %2 秒，系统代理未启用")
@@ -836,6 +962,9 @@ Status ProxyManager::startWithPath(const Models::Node &node, Kernel::Kind kernel
         runtime_.status.message = QStringLiteral("%1 运行中（启动耗时 %2 ms）")
                                       .arg(Kernel::kindDisplayName(kernel))
                                       .arg(elapsedMs);
+        if (qApp != nullptr && child->thread() == QThread::currentThread()) {
+            child->moveToThread(qApp->thread());
+        }
         runtime_.child = std::move(child);
         runtime_.workDir = std::move(workDir.value());
     }
@@ -870,9 +999,9 @@ Result<std::optional<SysProxy::Snapshot>> ProxyManager::stopWithSystemProxyResto
             if (killChild(child.get()).isErr()) {
                 errors << QStringLiteral("停止 %1 失败").arg(name);
             }
-        } else if (child->exitStatus() != QProcess::NormalExit) {
-            errors << QStringLiteral("读取 %1 状态失败").arg(name);
         }
+        auto *raw = child.release();
+        safeDeleteProcess(raw);
     }
     if (workDir && workDir->isValid()) {
         const Status cleaned = workDir->cleanup();
@@ -1062,7 +1191,7 @@ Result<QString> ProxyManager::recentLog(int maxChars)
     return Result<QString>::withValue(text.right(maxChars));
 }
 
-std::pair<bool, quint64> ProxyManager::probeHealth(int timeoutMs)
+HealthProbeResult ProxyManager::probeHealth(int timeoutMs, const QStringList &urls)
 {
     quint16 port = 0;
     {
@@ -1071,15 +1200,44 @@ std::pair<bool, quint64> ProxyManager::probeHealth(int timeoutMs)
     }
     QElapsedTimer clock;
     clock.start();
-    Net::Request request;
-    request.url = ProxyProbe::kProxyConnectivityTestUrl;
-    request.timeoutMs = timeoutMs;
-    request.connectTimeoutMs = std::min(timeoutMs, 1500);
-    request.proxyUrl = QStringLiteral("http://127.0.0.1:%1").arg(port);
-    request.userAgent = QStringLiteral("vpn-parser/1.0 (+https://localhost)");
-    const Result<Net::Response> response = Net::send(request);
-    const bool ok = response.isOk() && response.value().isSuccess();
-    return {ok, static_cast<quint64>(clock.elapsed())};
+    QStringList baselines = urls;
+    if (baselines.isEmpty()) {
+        baselines.append(ProxyProbe::kProxyConnectivityTestUrl);
+    }
+
+    HealthProbeResult result;
+    QStringList failures;
+    for (const QString &url : baselines) {
+        const qint64 left = timeoutMs - clock.elapsed();
+        if (left <= 0) {
+            failures.push_back(QStringLiteral("%1 预算用尽").arg(url));
+            break;
+        }
+        Net::Request request;
+        request.url = url;
+        request.timeoutMs = static_cast<int>(left);
+        request.connectTimeoutMs = std::min(static_cast<int>(left), 1500);
+        request.proxyUrl = QStringLiteral("http://127.0.0.1:%1").arg(port);
+        request.userAgent = QStringLiteral("vcc/1.0 (+https://localhost)");
+        const Result<Net::Response> response = Net::send(request);
+        if (response.isErr()) {
+            failures.push_back(QStringLiteral("%1 %2").arg(url, response.error()));
+            continue;
+        }
+        // 只认 2xx：403 是"出口到得了、被对方拒了"，按他 2026-10-12 的口径同样算故障。
+        if (!response.value().isSuccess()) {
+            failures.push_back(QStringLiteral("%1 HTTP %2")
+                                   .arg(url).arg(response.value().status));
+            continue;
+        }
+        // 任一条通就算通：延迟取这一条的耗时（第一个成功的那条）。
+        result.ok = true;
+        result.latencyMs = static_cast<quint64>(clock.elapsed());
+        return result;
+    }
+    result.latencyMs = static_cast<quint64>(clock.elapsed());
+    result.error = failures.join(QStringLiteral(" ; "));
+    return result;
 }
 
 }

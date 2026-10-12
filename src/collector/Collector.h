@@ -59,11 +59,18 @@ inline constexpr int kPerHostFetchConcurrency = 2;
 /// MIRROR_LIMIT = 6（:78）
 inline constexpr int kMirrorLimit = 6;
 /// reqwest 的 UA（:117），有些服务器按 UA 放行，必须逐字一致。
+/// 某些短链订阅站还按 UA 做内容协商：发 "clash.meta" 拿到的是完整 Clash 配置
+/// （实测 844KB、首字节 4~5s、整体 8~19s），发 Rust 这个 UA 拿到的是 161KB 订阅串
+/// （首字节 1.2s）。换错 UA 等于换了一份数据，还会把拉取推到超时边缘。
 inline constexpr const char *kUserAgent = "vpn-parser/1.0 (+https://localhost)";
 /// reqwest redirect Policy::limited(5)（:118）
 inline constexpr int kMaxRedirects = 5;
 /// fetch_attempt 里"至少也要给这一点点时间"的下限（:865 `max(Duration::from_millis(500))`）。
 inline constexpr qint64 kMinAttemptBudgetMs = 500;
+/// 外层看门狗相对 budget 的余量：响应头/响应体的分段超时现在由 Net::send 自己执行
+/// （Rust 的 `timeout(header_budget, send())` + chunk 空闲超时），外层只剩"分离线程整体
+/// 卡死"的保险，必须晚于 send 自己的整体时限，否则会把正常的"请求超时"抢成"响应头超时"。
+inline constexpr qint64 kTransportDeadlineSlackMs = 2000;
 
 inline constexpr const char *kGithubRawHost = "raw.githubusercontent.com"; // :43
 inline constexpr const char *kGistRawHost = "gist.githubusercontent.com";  // :49
@@ -182,11 +189,13 @@ public:
                                                      const QVector<FetchCandidate> &candidates,
                                                      const QString &taskId, qint64 budgetMs,
                                                      qint64 headerBudgetMs) const;
-    /// 对应 Rust `download_candidate`（:421）。
+    /// 对应 Rust `download_candidate`（:421）。cancel 只在竞速里传：赢家一出现，
+    /// 其余腿要立刻放手（Rust 是 abort_all），不传就是不可取消。
     Result<std::optional<Downloaded>> downloadCandidate(const Models::Source &source,
                                                         const FetchCandidate &candidate,
                                                         const QString &taskId, qint64 budgetMs,
-                                                        qint64 headerBudgetMs) const;
+                                                        qint64 headerBudgetMs,
+                                                        const Net::CancelToken &cancel = nullptr) const;
     /// 对应 Rust `read_source_body`（:746）：体积上限 + 下载中的耗时回填。
     Result<QByteArray> readSourceBody(const Net::Response &response, const QString &taskId,
                                       const QString &sourceId,

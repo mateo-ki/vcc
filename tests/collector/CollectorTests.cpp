@@ -35,7 +35,7 @@
 // 断言的是 URL / 条件请求头 / 重试次数 / fail_streak / 并发闸这些可观察行为，
 // canned response 的形状照抄 Rust 测试里的 fixture（同一条 ss:// 正文、同一套
 // gist 搜索页 HTML、同样的 503→200 序列）。库文件一律开在 QTemporaryDir 里，
-// 绝不碰 D:/software/VPN Parser/（那边有 Rust 实例在跑）。
+// 绝不碰任何真实的 VPN Parser 数据目录（那边可能有实例在跑）。
 namespace {
 
 const char *kNodeBody = "ss://YWVzLTEyOC1nY206cGFzcw==@1.2.3.4:443#node";
@@ -251,6 +251,69 @@ TEST(CollectorTests, only_network_failures_count_towards_the_fail_streak)
               QStringLiteral("response body too large: 80.0 MiB (limit 64 MiB)"));
 }
 
+/// 传输层的分段超时哨兵要翻回 Rust 的原话：响应头没到 = "响应头超时: Ns …"（:456），
+/// 头到了但体断死 = "read body failed (content-length=…): response body idle …"（:501-507）。
+/// 两条都必须算网络失败，才进 fail_streak、才值得重试。
+TEST(CollectorTests, transport_timeout_sentinels_become_rusts_fetch_errors)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const std::shared_ptr<Database> db = openDatabase(dir);
+    ASSERT_NE(db, nullptr);
+
+    auto state = std::make_shared<FakeState>();
+    auto sentinel = std::make_shared<QString>("响应头超时");
+    Tasks::TaskTracker tracker;
+    Collector::Collector collector(db, tracker);
+    collector.setTransport(makeTransport(state, [sentinel](const Net::Request &, FakeState &) {
+        return Result<Net::Response>::withError(*sentinel);
+    }));
+
+    const Models::Source source = createSource(db, QStringLiteral("sentinels"),
+                                               testUrl(QStringLiteral("sentinels")));
+    const QString taskId = tracker.start(Tasks::Kind::Fetch, {{source.id, source.name}});
+    const Collector::FetchCandidate candidate{
+        source.urlTemplate, Collector::urlHost(source.urlTemplate), false};
+
+    Result<std::optional<Collector::Downloaded>> hung = collector.downloadCandidate(
+        source, candidate, taskId, Collector::kDefaultFetchTimeoutMs,
+        Collector::kResponseHeaderTimeoutMs);
+    ASSERT_TRUE(hung.isErr());
+    const QString headerMessage = Collector::Messages::format(
+        Collector::Messages::responseHeaderTimeout(), {QStringLiteral("6")});
+    ASSERT_EQ(hung.error(), headerMessage);
+    ASSERT_TRUE(Collector::isNetworkFetchFailure(hung.error()));
+    ASSERT_TRUE(Collector::isRetryableFetchFailure(hung.error()));
+
+    *sentinel = QStringLiteral("response body idle for 5s after 20 bytes (overall limit 30s)");
+    Result<std::optional<Collector::Downloaded>> stalled = collector.downloadCandidate(
+        source, candidate, taskId, Collector::kDefaultFetchTimeoutMs,
+        Collector::kResponseHeaderTimeoutMs);
+    ASSERT_TRUE(stalled.isErr());
+    ASSERT_EQ(stalled.error(), QStringLiteral(
+                                  "read body failed (content-length=unknown): response body idle "
+                                  "for 5s after 20 bytes (overall limit 30s)"));
+    ASSERT_TRUE(Collector::isNetworkFetchFailure(stalled.error()))
+        << stalled.error().toStdString();
+    ASSERT_TRUE(Collector::isRetryableFetchFailure(stalled.error()));
+
+    // 分段预算要真的挂到请求上，否则 Net::send 无从分段计时。
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        ASSERT_EQ(state->requests.size(), 2);
+        for (const Net::Request &request : state->requests) {
+            ASSERT_EQ(request.headerTimeoutMs, int(Collector::kResponseHeaderTimeoutMs));
+            ASSERT_EQ(request.bodyIdleTimeoutMs, int(Collector::kBodyIdleTimeoutMs));
+            ASSERT_EQ(request.timeoutMs, int(Collector::kDefaultFetchTimeoutMs));
+            // UA 逐字钉死（Rust mod.rs:117）：订阅服务器按 UA 做内容协商，写成 clash 类
+            // UA 会让某些短链订阅站返回整份 Clash 配置（实测 844KB / 首字节 4~5s /
+            // 最长 19s），而 Rust 拿到的是 161KB 订阅串（首字节 1.2s）。
+            ASSERT_EQ(request.userAgent.toStdString(),
+                      std::string("vpn-parser/1.0 (+https://localhost)"));
+        }
+    }
+}
+
 /// 对应 Rust `hanging_source_is_capped_by_the_total_budget`（:1242）。
 TEST(CollectorTests, hanging_source_is_capped_by_the_total_budget)
 {
@@ -264,11 +327,14 @@ TEST(CollectorTests, hanging_source_is_capped_by_the_total_budget)
     auto served = std::make_shared<std::atomic<int>>(0);
     Tasks::TaskTracker tracker;
     Collector::Collector collector(db, tracker);
-    collector.setTransport(makeTransport(state, [served, hold](const Net::Request &, FakeState &) {
+    collector.setTransport(makeTransport(state, [served, hold](const Net::Request &request,
+                                                              FakeState &) {
         served->fetch_add(1);
-        // 收下连接但永远不答：connect_timeout 抓不到的那种挂死。
-        hold->wait(std::chrono::seconds(2));
-        return Result<Net::Response>::withValue(canned(200, QByteArray()));
+        // 收下连接但永远不答：connect_timeout 抓不到的那种挂死。传输契约里"等响应头"
+        // 这段预算由传输方自己执行（Net::send 里的 headerTimer），假传输照同一套做，
+        // 到点给同一个哨兵；外层看门狗只是分离线程真卡死时的保险，不该先响。
+        hold->wait(std::chrono::milliseconds(qMax<qint64>(request.headerTimeoutMs, 1)));
+        return Result<Net::Response>::withError(QStringLiteral("响应头超时"));
     }));
 
     const Models::Source source = createSource(db, QStringLiteral("hang"),
@@ -396,17 +462,25 @@ TEST(CollectorTests, race_keeps_the_first_candidate_that_answers)
     const std::shared_ptr<Database> db = openDatabase(dir);
     ASSERT_NE(db, nullptr);
 
-    auto hold = std::make_shared<Hold>();
     auto state = std::make_shared<FakeState>();
+    // 慢腿要能报告"我有没有被主动取消"：这是 abort_all 那半边语义的唯一观察点。
+    auto slowSawCancel = std::make_shared<std::atomic<bool>>(false);
     const QString slowUrl = testUrl(QStringLiteral("race-slow"));
     const QString fastUrl = testUrl(QStringLiteral("race-fast"));
     Tasks::TaskTracker tracker;
     Collector::Collector collector(db, tracker);
-    collector.setTransport(makeTransport(state, [slowUrl, fastUrl, hold](
+    collector.setTransport(makeTransport(state, [slowUrl, fastUrl, slowSawCancel](
                                                    const Net::Request &request, FakeState &) {
         if (request.url == slowUrl) {
-            // 收下连接但不回答：raw.githubusercontent.com 被墙时的样子。
-            hold->wait(std::chrono::seconds(2));
+            // 收下连接但不回答：raw.githubusercontent.com 被墙时的样子。赢家出现后
+            // raceCandidates 会置起这条腿的取消标志，所以这里改成轮询标志而不是死等 2s。
+            for (int tick = 0; tick < 300; ++tick) {
+                if (request.cancel != nullptr && request.cancel->isCancelled()) {
+                    slowSawCancel->store(true);
+                    return Result<Net::Response>::withError(Net::cancelledError());
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
             return Result<Net::Response>::withError(QStringLiteral("request failed: hung peer"));
         }
         return Result<Net::Response>::withValue(canned(200, QByteArray(kNodeBody)));
@@ -423,7 +497,6 @@ TEST(CollectorTests, race_keeps_the_first_candidate_that_answers)
     started.start();
     Result<std::optional<Collector::Downloaded>> downloaded = collector.raceCandidates(
         source, candidates, taskId, 6000, Collector::kResponseHeaderTimeoutMs);
-    hold->release();
 
     ASSERT_TRUE(downloaded.isOk()) << downloaded.error().toStdString();
     ASSERT_TRUE(downloaded.value().has_value()) << "候选应返回响应体";
@@ -432,6 +505,13 @@ TEST(CollectorTests, race_keeps_the_first_candidate_that_answers)
     // 竞速的意义就在于不等慢的那条腿跑完预算。
     ASSERT_LT(qint64(started.elapsed()), qint64(3000)) << qint64(started.elapsed());
     ASSERT_EQ(reload(db, source.id).lastFetchHost, QStringLiteral("mirror.test"));
+
+    // abort_all 那半边：慢腿必须收到取消信号并自己收摊，而不是占着闸跑满 6s 预算。
+    // 它是分离线程，这里给它一个短窗口观察（轮询周期 10ms）。
+    for (int tick = 0; tick < 200 && !slowSawCancel->load(); ++tick) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(slowSawCancel->load()) << "赢家出现后，落败的腿没收到取消信号";
 }
 
 /// 对应 Rust `extract_gists_reads_snippet_blocks`（:1539）。

@@ -14,7 +14,7 @@ Result<Models::AppSettings> Database::getSettings()
                        speedtest_reuse_minutes, speedtest_conditional_isolation,
                        speedtest_download_top_n, bandwidth_guard, bandwidth_min_kbps,
                        publisher_api, publisher_token, ui_theme, kernel_source, firewall_auto_allow,
-                       auto_failover, speedtest_auto_refill,
+                       auto_failover, speedtest_auto_refill, failover_probe_urls,
                        auto_prepare_kernel, speedtest_added_source,
                        last_auto_fetch_at, last_auto_speedtest_at
                 FROM settings WHERE id = 1)";
@@ -81,6 +81,7 @@ Result<Models::AppSettings> Database::getSettings()
     settings.firewallAutoAllow = row.flag("firewall_auto_allow", false);
     settings.autoFailover = row.flag("auto_failover", false);
     settings.speedtestAutoRefill = row.flag("speedtest_auto_refill", false);
+    settings.failoverProbeUrls = row.text("failover_probe_urls");
     // 这两条缺列时按"开"读：它们是默认开的行为开关，不能因为老库没这列就变成关。
     settings.autoPrepareKernel = row.flag("auto_prepare_kernel", true);
     settings.speedtestAddedSource = row.flag("speedtest_added_source", true);
@@ -183,6 +184,9 @@ Result<Models::AppSettings> Database::updateSettings(const Models::UpdateSetting
     if (patch.autoFailover) {
         settings.autoFailover = *patch.autoFailover;
     }
+    if (patch.failoverProbeUrls) {
+        settings.failoverProbeUrls = patch.failoverProbeUrls->trimmed();
+    }
     if (patch.speedtestAutoRefill) {
         settings.speedtestAutoRefill = *patch.speedtestAutoRefill;
     }
@@ -222,7 +226,8 @@ Result<Models::AppSettings> Database::updateSettings(const Models::UpdateSetting
                  auto_failover=?,
                  speedtest_auto_refill=?,
                  auto_prepare_kernel=?,
-                 speedtest_added_source=?
+                 speedtest_added_source=?,
+                 failover_probe_urls=?
                WHERE id=1)";
 
     auto lease = main_->acquire();
@@ -260,7 +265,8 @@ Result<Models::AppSettings> Database::updateSettings(const Models::UpdateSetting
     statement.bindBool(index++, settings.autoFailover);
     statement.bindBool(index++, settings.speedtestAutoRefill);
     statement.bindBool(index++, settings.autoPrepareKernel);
-    statement.bindBool(index, settings.speedtestAddedSource);
+    statement.bindBool(index++, settings.speedtestAddedSource);
+    statement.bindText(index, settings.failoverProbeUrls);
 
     const Result<bool> stepped = statement.step();
     if (stepped.isErr()) {

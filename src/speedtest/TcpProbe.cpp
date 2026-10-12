@@ -179,7 +179,7 @@ DownloadMeasurement measureTcpDownload(QTcpSocket &socket, const QString &host, 
     // 尽力而为：加密代理大多不会回应这个明文 GET，测不到就留空。
     const QByteArray request = QStringLiteral(
                                    "GET / HTTP/1.1\r\nHost: %1\r\nUser-Agent: "
-                                   "vpn-parser-speedtest/0.1\r\nAccept: */*\r\nConnection: "
+                                   "vcc-speedtest/0.1\r\nAccept: */*\r\nConnection: "
                                    "close\r\n\r\n")
                                    .arg(host)
                                    .toUtf8();

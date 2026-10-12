@@ -58,14 +58,12 @@ QString trayWindowClass()
 
 QString mainWindowTitle()
 {
-    return QStringLiteral("VPN Parser");
+    return QStringLiteral("VCC");
 }
 
 QString wakeupMessageName()
 {
-    // Rust 的常量把结尾 NUL 写在了字符串里（"VPN_PARSER_SHOW_WINDOW_MSG\0"），
-    // QString::utf16() 自带结尾零，等价。
-    return QStringLiteral("VPN_PARSER_SHOW_WINDOW_MSG");
+    return QStringLiteral("VCC_SHOW_WINDOW_MSG");
 }
 
 #ifdef Q_OS_WIN

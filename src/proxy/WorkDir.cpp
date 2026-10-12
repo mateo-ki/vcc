@@ -16,7 +16,7 @@ namespace Proxy {
 Result<ProxyWorkDir> ProxyWorkDir::create(Kernel::Kind kernel)
 {
     const QString base = QDir::tempPath();
-    const QString root = QDir(base).filePath(QStringLiteral("vpn-parser-proxy-%1")
+    const QString root = QDir(base).filePath(QStringLiteral("vcc-proxy-%1")
                                                  .arg(Ids::newUuidV4()));
     if (!QDir().mkpath(root)) {
         return Result<ProxyWorkDir>::withError(

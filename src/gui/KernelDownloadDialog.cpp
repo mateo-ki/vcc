@@ -1,5 +1,6 @@
 #include "gui/KernelDownloadDialog.h"
 
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -37,7 +38,7 @@ KernelDownloadDialog::KernelDownloadDialog(Kernel::Kind kind,
         QStringLiteral("选择从 GitHub Release 镜像通道下载，或直接导入本地已准备好的 zip 压缩包。"), this);
     subLabel->setObjectName(QStringLiteral("Subtitle"));
     subLabel->setWordWrap(true);
-    subLabel->setStyleSheet(QStringLiteral("font-size: 12px; color: #64748b; margin-bottom: 4px;"));
+    Gui::Theme::setWidgetCss(subLabel, QStringLiteral("font-size: 12px; color: {muted}; margin-bottom: 4px;"));
     root->addWidget(subLabel);
 
     // 下载方式卡片区
@@ -55,14 +56,16 @@ KernelDownloadDialog::KernelDownloadDialog(Kernel::Kind kind,
         const bool isProxy = (opt.source == Kernel::Source::Proxy);
         const bool optionEnabled = !isProxy || proxyAvailable_;
 
-        auto *itemWidget = new QWidget(optionsCard);
+        auto *itemWidget = new QFrame(optionsCard);
+        itemWidget->setObjectName(QStringLiteral("SourceOptionCard"));
+        itemWidget->setCursor(optionEnabled ? Qt::PointingHandCursor : Qt::ForbiddenCursor);
         auto *itemLayout = new QVBoxLayout(itemWidget);
-        itemLayout->setContentsMargins(4, 4, 4, 4);
-        itemLayout->setSpacing(2);
+        itemLayout->setContentsMargins(10, 8, 10, 8);
+        itemLayout->setSpacing(3);
 
         auto *radio = new QRadioButton(opt.label, itemWidget);
         radio->setEnabled(optionEnabled);
-        radio->setStyleSheet(QStringLiteral("font-weight: 600; font-size: 13px;"));
+        radio->setStyleSheet(QStringLiteral("font-weight: 700; font-size: 13px;"));
         sourceGroup_->addButton(radio, static_cast<int>(opt.source));
         itemLayout->addWidget(radio);
 
@@ -72,9 +75,14 @@ KernelDownloadDialog::KernelDownloadDialog(Kernel::Kind kind,
         }
         auto *hintLabel = new QLabel(hintText, itemWidget);
         hintLabel->setObjectName(QStringLiteral("Subtitle"));
-        hintLabel->setStyleSheet(QStringLiteral("color: #64748b; font-size: 11px; margin-left: 20px;"));
+        Gui::Theme::setWidgetCss(hintLabel, QStringLiteral("color: {muted}; font-size: 11px; margin-left: 20px;"));
         hintLabel->setWordWrap(true);
         itemLayout->addWidget(hintLabel);
+
+        itemWidget->setProperty("radioPtr", QVariant::fromValue(static_cast<void *>(radio)));
+        hintLabel->setProperty("radioPtr", QVariant::fromValue(static_cast<void *>(radio)));
+        itemWidget->installEventFilter(this);
+        hintLabel->installEventFilter(this);
 
         optionsLayout->addWidget(itemWidget);
 
@@ -133,7 +141,7 @@ KernelDownloadDialog::KernelDownloadDialog(Kernel::Kind kind,
 
     // 错误 / 提示标签
     warningLabel_ = new QLabel(this);
-    warningLabel_->setStyleSheet(QStringLiteral("color: #ef4444; font-size: 11px; font-weight: 600;"));
+    Gui::Theme::setWidgetCss(warningLabel_, QStringLiteral("color: {danger}; font-size: 11px; font-weight: 600;"));
     warningLabel_->setVisible(false);
     root->addWidget(warningLabel_);
 
@@ -171,7 +179,7 @@ KernelDownloadDialog::KernelDownloadDialog(Kernel::Kind kind,
 
     root->addLayout(btnRow);
 
-    connect(sourceGroup_, &QButtonGroup::idToggled, this, [this]() { updateUiState(); });
+    connect(sourceGroup_, &QButtonGroup::idClicked, this, [this](int) { updateUiState(); });
 
     updateUiState();
 }
@@ -195,11 +203,25 @@ void KernelDownloadDialog::updateUiState()
     const bool isLocal = (selectedSource() == Kernel::Source::Local);
     localFileContainer_->setVisible(isLocal);
 
+    for (auto *btn : sourceGroup_->buttons()) {
+        auto *w = btn->parentWidget();
+        if (w != nullptr) {
+            if (btn->isChecked()) {
+                Gui::Theme::setWidgetCss(w, QStringLiteral(
+                    "QFrame#SourceOptionCard { background: {accentBg}; border: 1.5px solid {accent}; border-radius: 6px; }"));
+            } else {
+                Gui::Theme::setWidgetCss(w, QStringLiteral(
+                    "QFrame#SourceOptionCard { background: {panelHover}; border: 1px solid {borderSubtle}; border-radius: 6px; }"
+                    "QFrame#SourceOptionCard:hover { border-color: {muted}; background: {panelHover}; }"));
+            }
+        }
+    }
+
     if (isLocal) {
         startBtn_->setText(QStringLiteral("开始安装"));
         const bool hasPath = !localFilePath().isEmpty();
         if (!hasPath) {
-            warningLabel_->setText(QStringLiteral("先选好本地 zip 文件"));
+            warningLabel_->setText(QStringLiteral("请先选择本地 zip 文件"));
             warningLabel_->setVisible(true);
         } else {
             warningLabel_->setVisible(false);
@@ -208,6 +230,22 @@ void KernelDownloadDialog::updateUiState()
         startBtn_->setText(QStringLiteral("开始下载"));
         warningLabel_->setVisible(false);
     }
+}
+
+bool KernelDownloadDialog::eventFilter(QObject *obj, QEvent *ev)
+{
+    if (ev->type() == QEvent::MouseButtonPress) {
+        auto *w = qobject_cast<QWidget *>(obj);
+        if (w != nullptr && w->property("radioPtr").isValid()) {
+            auto *radio = static_cast<QRadioButton *>(w->property("radioPtr").value<void *>());
+            if (radio != nullptr && radio->isEnabled()) {
+                radio->setChecked(true);
+                updateUiState();
+                return true;
+            }
+        }
+    }
+    return QDialog::eventFilter(obj, ev);
 }
 
 } // namespace Gui
