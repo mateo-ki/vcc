@@ -22,7 +22,10 @@ env:
   # and cache here.
   VCC_VCPKG: ${{ github.workspace }}/../vcpkg-ci
   VCC_VCPKG_SHA: e456309491fd875487bf02b8a0dca76c1b1b00cc
-  VCPKG_PORTS: libarchive nlohmann-json openssl qt6 unofficial-sqlite3 yaml-cpp zlib
+  # vcpkg has no `qt6` metaport any more (CI proved it: "ports/qt6: error: qt6 does not
+  # exist"). The Qt6 modules this project finds are split ports: qtbase carries
+  # Core/Gui/Widgets/Network/Concurrent, qtsvg carries Svg.
+  VCPKG_PORTS: qtbase qtsvg libarchive nlohmann-json openssl sqlite3 yaml-cpp zlib
   VCPKG_BINARY_SOURCES: files;${{ github.workspace }}/../vcpkg-cache;readwrite
 
 jobs:
@@ -61,11 +64,19 @@ jobs:
 
       - name: Install the dependencies
         shell: bash
-        run: '"$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS'
+        # msvc-dev-cmd leaves VCPKG_ROOT pointing at the vcpkg bundled with Visual Studio.
+        # A vcpkg.exe that disagrees with VCPKG_ROOT refuses to run at all (that is the
+        # 0-second failure this step had), so pin the variable to the tree we bootstrapped.
+        env:
+          VCPKG_ROOT: ${{ env.VCC_VCPKG }}
+        run: |
+          "$VCC_VCPKG/vcpkg.exe" version
+          "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS
 
       - name: Configure
         shell: bash
         run: |
+          export VCPKG_ROOT="$VCC_VCPKG"
           cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
             -DVCC_BUILD_TESTS=ON
@@ -126,7 +137,11 @@ jobs:
 
       - name: Install the dependencies
         shell: bash
-        run: '"$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS'
+        env:
+          VCPKG_ROOT: ${{ env.VCC_VCPKG }}
+        run: |
+          "$VCC_VCPKG/vcpkg.exe" version
+          "$VCC_VCPKG/vcpkg.exe" install --triplet x64-windows $VCPKG_PORTS
 
       - name: Install Inno Setup
         shell: powershell
@@ -158,6 +173,7 @@ jobs:
       - name: Build Release, prune dist, compile the installer
         shell: bash
         run: |
+          export VCPKG_ROOT="$VCC_VCPKG"
           cmake -S . -B build-rel -G "Visual Studio 17 2022" -A x64 \
             -DCMAKE_TOOLCHAIN_FILE="$VCC_VCPKG/scripts/buildsystems/vcpkg.cmake" \
             -DVCC_BUILD_TESTS=OFF
