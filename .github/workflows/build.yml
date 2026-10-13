@@ -25,7 +25,13 @@ env:
   # path outside GITHUB_WORKSPACE, and the previous layout (workspace/../vcpkg-ci) meant
   # this repo never stored a single cache entry - so every run paid a fresh ~1h Qt build.
   VCC_VCPKG: ${{ github.workspace }}/.ci/vcpkg
-  VCC_VCPKG_SHA: e456309491fd875487bf02b8a0dca76c1b1b00cc
+  # The commit the developer's own tree is on (`git -C D:/vcpkg log -1 --format=%H`), not
+  # "the tip when someone last edited this line". The previous pin was a snapshot one Qt
+  # minor ahead (6.11.2 vs the local 6.10.2), so CI compiled the GUI against a Qt nobody
+  # had run the tests against. It was not the cause of the red suites - those were a
+  # dangling-page bug reproducible here - but a build must not silently drift ahead of
+  # the tree it is validating.
+  VCC_VCPKG_SHA: e64546260d40765da00e64390b19fcade13f3986
   # vcpkg has no `qt6` metaport any more (CI proved it: "ports/qt6: error: qt6 does not
   # exist"). The Qt6 modules this project finds are split ports: qtbase carries
   # Core/Gui/Widgets/Network/Concurrent, qtsvg carries Svg.
@@ -135,11 +141,12 @@ jobs:
           sh ci/annotate-fail.sh "$status" "ctest" tests.log
           exit $status
 
-      - name: Static guards (layer boundaries, single colour source)
+      - name: Static guards (layer boundaries, single colour source, async owners)
         shell: bash
         run: |
           node tools/check-decoupling.mjs
           node tools/check-hardcoded-colors.mjs
+          node tools/check-async-owners.mjs
 
       # Job logs need repository rights to download, so keep the per-step logs as an
       # artifact too - the annotation only carries the tail.

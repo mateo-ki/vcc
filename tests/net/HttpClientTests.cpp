@@ -131,7 +131,9 @@ TEST(HttpClientTests, aBodyThatStopsMidwayIsReportedWithRustsIdleMessage)
     FakeServer server(Behaviour::HeadersThenStall);
     ASSERT_TRUE(server.start());
 
-    const Result<Net::Response> result = Net::send(requestFor(server, 8000, 400, 1000));
+    // 头预算要给够：这条测的是"正文半途停"的落点，不是头预算。假服务器和客户端跑在
+    // 同一个事件循环里，400ms 的余量在本机够、在慢机器上会先被"响应头超时"抢掉。
+    const Result<Net::Response> result = Net::send(requestFor(server, 8000, 3000, 1000));
 
     ASSERT_TRUE(result.isErr());
     // Rust read_source_body（mod.rs:759-765）的原话形状。
@@ -151,7 +153,10 @@ TEST(HttpClientTests, aSlowButLivingBodyIsNotCutOffByTheHeaderBudget)
 
     QElapsedTimer started;
     started.start();
-    const Result<Net::Response> result = Net::send(requestFor(server, 8000, 500, 1500));
+    // 头预算 500ms 在慢机器上会被"进程内假服务器还没来得及写头"先吃掉（CI 实测 890ms
+    // 报响应头超时），那就变成在测调度而不是测正文续命。抬到 1500ms：正文 12×150ms
+    // ≈1.8s 仍然明显比头预算活得久，这条的论点不变。
+    const Result<Net::Response> result = Net::send(requestFor(server, 8000, 1500, 1500));
     const qint64 elapsed = started.elapsed();
 
     ASSERT_TRUE(result.isOk()) << result.error().toStdString();

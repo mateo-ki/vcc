@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QString>
 #include <QStringList>
 
@@ -522,6 +523,12 @@ TEST(KernelManager, version_probe_returns_the_first_line_of_a_stub)
         GTEST_SKIP() << "PATH 里找不到 node.exe，跳过桩探测";
     }
     // `node -v` 与 mihomo 的 `-v` 同形：打印一行版本就退出。
+    // 先白跑一次：产品侧的探测预算是 Rust 的 5s（kernel/mod.rs:502），不改；但 CI 的
+    // 共享机器上，杀软第一次扫 node.exe 就能吃掉这 5s。预热测的是解析，不是冷启动。
+    QProcess warmup;
+    warmup.start(stub, {QStringLiteral("-v")});
+    warmup.waitForFinished(30000);
+
     const Result<QString> result = readKernelVersion(Kind::Mihomo, stub);
     ASSERT_TRUE(result.isOk()) << result.error().toStdString();
     EXPECT_FALSE(result.value().isEmpty());

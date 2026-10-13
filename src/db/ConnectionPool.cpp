@@ -20,7 +20,9 @@ Result<std::shared_ptr<ConnectionPool>> ConnectionPool::create(const QString &pa
         pool->busy_.push_back(false);
         pool->shrunk_.push_back(false);
         // 刚开的连接也算"刚用过"，不然创建后第一次回收会立刻去缩它。
-        pool->lastUsedMs_.push_back(0);
+        // 必须是当前时刻：0 是"时钟起点"，慢机器上建库+建表一旦超过 idle 线，这条没被
+        // 用过的连接就会在第一次 reap 时被缩掉（CI 上实测 45ms 就翻车）。
+        pool->lastUsedMs_.push_back(pool->idleClock_.elapsed());
     }
     return Result<std::shared_ptr<ConnectionPool>>::withValue(std::move(pool));
 }

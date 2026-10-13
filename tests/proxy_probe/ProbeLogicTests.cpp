@@ -326,7 +326,9 @@ TEST(ProbeJoinWindow, JoinsInCompletionOrder)
 {
     JoinWindow<int> window(4);
     for (int index = 0; index < 4; ++index) {
-        const int delay = (3 - index) * 40;
+        // 步长要明显大于线程调度抖动：40ms 的间隔在本机稳，在慢机器上会被调度顺序颠倒
+        // （这条测的是"按完成顺序 join"，不是"40ms 内可分辨"）。
+        const int delay = (3 - index) * 250;
         ASSERT_TRUE(window.trySpawn([index, delay]() {
             std::this_thread::sleep_for(std::chrono::milliseconds(delay));
             return index;

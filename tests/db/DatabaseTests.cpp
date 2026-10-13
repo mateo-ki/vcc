@@ -360,16 +360,18 @@ TEST(ConnectionPoolReap, idleConnectionsShrinkTheirCacheAndStayUsable)
     ASSERT_TRUE(directory.isValid());
     const QString path = poolProbePath(directory, QStringLiteral("reap"));
 
-    auto pool = makePool(path, 3, /*idleTimeoutMs=*/40);
-    seedTable(*pool);
+    auto pool = makePool(path, 3, /*idleTimeoutMs=*/150);
+    // "还没到空闲线"必须紧贴 create 来验，中间不许插磁盘活：以前这里先跑 seedTable
+    // （建表 + 改写，实测 271->500 ms），而空闲线只有 40ms，慢机器上第一条语句还没执行
+    // 到回收，三条连接就已经"过期"了 —— 测的是磁盘，不是空闲线。
     EXPECT_EQ(pool->maxConnections(), 3);
     EXPECT_EQ(pool->shrunkConnections(), 0);
 
-    // 还没到空闲线：一条都不该动。
     pool->reapIdle();
     EXPECT_EQ(pool->shrunkConnections(), 0);
 
-    QThread::msleep(120);
+    seedTable(*pool);
+    QThread::msleep(400);
     pool->reapIdle();
     EXPECT_EQ(pool->shrunkConnections(), 3);
     // 关键：句柄都还在，读写照常（回收只缩页缓存，不改并发语义）。
@@ -380,7 +382,7 @@ TEST(ConnectionPoolReap, idleConnectionsShrinkTheirCacheAndStayUsable)
     { auto lease = pool->acquire(); }
     EXPECT_EQ(pool->shrunkConnections(), 2);
 
-    QThread::msleep(120);
+    QThread::msleep(400);
     pool->reapIdle();
     EXPECT_EQ(pool->shrunkConnections(), 3);
     EXPECT_EQ(readProbe(*pool), QStringLiteral("alive"));
