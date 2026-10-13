@@ -258,7 +258,8 @@ jobs:
       - name: Locate ISCC
         shell: bash
         run: |
-          for candidate in "/c/Program Files (x64)/Inno Setup 6/ISCC.exe" \
+          for candidate in "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+                           "/c/Program Files (x64)/Inno Setup 6/ISCC.exe" \
                            "/c/Program Files/Inno Setup 6/ISCC.exe"; do
             if [ -f "$candidate" ]; then
               echo "ISCC=$(cygpath -w "$candidate")" >> "$GITHUB_ENV"

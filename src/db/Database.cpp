@@ -232,7 +232,7 @@ QVector<QString> Database::nodeScopes(const QString &sourceId)
     if (sourceId == kUngroupedSourceId) {
         return {QString()};
     }
-    if (!sourceId.isNull()) {
+    if (!sourceId.isNull() && !sourceId.isEmpty()) {
         return {sourceId};
     }
     QVector<QString> scopes;

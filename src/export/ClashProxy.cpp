@@ -456,7 +456,7 @@ void normalizeVless(Json &cfg, const Models::Node &node)
     put(*obj, "skip-cert-verify", Json(false));
 
     for (const char *key : {"security", "encryption", "pbk", "sid", "fp", "sni", "serviceName",
-                            "allowInsecure", "insecure", "id", "net", "add"}) {
+                            "allowInsecure", "insecure", "id", "net", "add", "ech"}) {
         drop(*obj, key);
     }
     if (holds(*obj, "ws-opts") || holds(*obj, "grpc-opts")) {

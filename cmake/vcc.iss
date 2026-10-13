@@ -14,7 +14,7 @@
 ;      装到 Program Files 又没提权时，写库会静默失败 → 默认走 per-user 目录。
 
 #define MyAppName "VCC"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppExeName "vcc.exe"
 #define MyDist "..\build-rel\Release\dist"
 
