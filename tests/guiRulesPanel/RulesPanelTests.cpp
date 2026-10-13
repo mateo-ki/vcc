@@ -196,7 +196,7 @@ TEST(RulesPanelTests, draftKindComboMatchesRustRuleDraftKindAll)
     ASSERT_EQ(actionCombo->count(), 3);
     EXPECT_EQ(actionCombo->currentData().toInt(), int(Proxy::RuleAction::Proxy));
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, routingModeDrivesSubtitleDetailAndSectionVisibility)
@@ -269,7 +269,7 @@ TEST(RulesPanelTests, routingModeDrivesSubtitleDetailAndSectionVisibility)
     QCoreApplication::processEvents();
     EXPECT_TRUE(page->customRulesVisible());
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, busyNoticesShowAndDisableTheConfigWidgets)
@@ -300,7 +300,7 @@ TEST(RulesPanelTests, busyNoticesShowAndDisableTheConfigWidgets)
     EXPECT_TRUE(saveMode->isEnabled());
     EXPECT_TRUE(preset->isEnabled());
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, rulesTableShowsMatcherActionAndMoveDeleteAffordances)
@@ -381,7 +381,7 @@ TEST(RulesPanelTests, rulesTableShowsMatcherActionAndMoveDeleteAffordances)
               UiText::ruleActionReject().toStdString());
     delete editor;
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, processNameRuleWarnsOutsideTunMode)
@@ -430,7 +430,7 @@ TEST(RulesPanelTests, processNameRuleWarnsOutsideTunMode)
     QCoreApplication::processEvents();
     EXPECT_TRUE(page->processNameWarningText().isEmpty());
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, invalidNewRuleReportsRuleInvalidPrefix)
@@ -476,7 +476,7 @@ TEST(RulesPanelTests, invalidNewRuleReportsRuleInvalidPrefix)
     EXPECT_EQ(page->ruleRowMatcherText(0).toStdString(),
               UiText::matcherLabelDomain().arg(QStringLiteral("example.com")).toStdString());
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, recommendedRulesGoThroughTheConfirmModal)
@@ -540,7 +540,7 @@ TEST(RulesPanelTests, recommendedRulesGoThroughTheConfirmModal)
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     EXPECT_FALSE(page->rulesBusy()) << "确认后的保存在飞太久";
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, autoOptimizeReportsRustWordings)
@@ -583,7 +583,7 @@ TEST(RulesPanelTests, autoOptimizeReportsRustWordings)
     ASSERT_EQ(messages.size(), 1);
     EXPECT_EQ(messages.first().toStdString(), UiText::optimizeAlreadyBest().toStdString());
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, injectedOverrideNoticeIsComputedNotTyped)
@@ -609,7 +609,7 @@ TEST(RulesPanelTests, injectedOverrideNoticeIsComputedNotTyped)
     // 生成的旧文案里那句 "YouTube · Google · Telegram · Twitter" 是编的，不能再出现。
     EXPECT_EQ(page->injectedNoticeText().contains(QStringLiteral("Twitter")), false);
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RulesPanelTests, presetButtonsCarryTheSixRustTooltips)
@@ -647,7 +647,7 @@ TEST(RulesPanelTests, presetButtonsCarryTheSixRustTooltips)
     EXPECT_GT(page->ruleRowCount(), before) << "点了预设却没加规则";
     waitForRulesIdle(*page);
 
-    page->deleteLater();
+    delete page;
 }
 
 int main(int argc, char *argv[])

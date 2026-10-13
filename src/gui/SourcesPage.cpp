@@ -1313,7 +1313,7 @@ void SourcesPage::fetchAllEnabled()
                 QStringLiteral("拉取失败: %1").arg(resultBox->error()));
         }
         reloadSources();
-    });
+    }, this);
 }
 
 void SourcesPage::fetchAllViaProxy()
@@ -1359,7 +1359,7 @@ void SourcesPage::fetchAllViaProxy()
                 QStringLiteral("代理拉取失败: %1").arg(resultBox->error()));
         }
         reloadSources();
-    });
+    }, this);
 }
 
 void SourcesPage::fetchOne(const QString &sourceId)
@@ -1412,7 +1412,7 @@ void SourcesPage::fetchOne(const QString &sourceId)
         }
         // 只重写这一条：整表重建会把其它行的控件全换一遍（选中、滚动、hover 都丢）。
         refreshSourceRow(sourceId);
-    });
+    }, this);
 }
 
 void SourcesPage::fetchOneViaProxy(const QString &sourceId)
@@ -1460,7 +1460,7 @@ void SourcesPage::fetchOneViaProxy(const QString &sourceId)
                 QStringLiteral("代理拉取请求失败: %1").arg(resultBox->error()));
         }
         refreshSourceRow(sourceId);
-    });
+    }, this);
 }
 
 void SourcesPage::toggleSourceEnabled(const QString &sourceId, bool enabled)
@@ -1537,7 +1537,7 @@ void SourcesPage::analyzeHomogeneity()
         } else {
             emit statusMessageRequested(QStringLiteral("同质化分析失败: %1").arg(resultBox->error()));
         }
-    });
+    }, this);
 }
 
 void SourcesPage::discoverGists()
@@ -1618,7 +1618,7 @@ void SourcesPage::discoverGists()
                 .arg(summaryBox->nodes)
                 .arg(summaryBox->skipped + summaryBox->rejected));
         reloadSources();
-    });
+    }, this);
 }
 
 QWidget *createSourcesPage(App::AppContext &context, QWidget *parent)

@@ -177,7 +177,7 @@ void IpRiskDialog::runCheck()
                 copyButton_->setEnabled(true);
             }
             updateUi();
-        });
+        }, this);
 }
 
 void IpRiskDialog::updateUi()

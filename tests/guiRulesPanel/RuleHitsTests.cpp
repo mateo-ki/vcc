@@ -77,7 +77,7 @@ TEST(RuleHitsTests, cardIsAbsentWhenNothingMatched)
     page->setRuleHitsForTest({hit("MATCH,PROXY", "PROXY", 1)});
     EXPECT_TRUE(page->ruleHitsCardVisible());
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RuleHitsTests, summaryAddsTotalsAndMatchShareExactlyLikeRust)
@@ -135,7 +135,7 @@ TEST(RuleHitsTests, rowsRenderRuleArrowTargetAndCount)
     EXPECT_TRUE(labels.contains(UiText::hitsArrow().arg(QStringLiteral("DIRECT"))));
     EXPECT_TRUE(labels.contains(UiText::hitsCount().arg(7)));
 
-    page->deleteLater();
+    delete page;
 }
 
 TEST(RuleHitsTests, tallyCountsEachConnectionIdOnlyOnce)
@@ -235,7 +235,7 @@ TEST(RuleHitsTests, flushWritesTheDayTableAndReadsBack)
     }
     EXPECT_EQ(total, 3) << "重复快照把命中算重了";
 
-    page->deleteLater();
+    delete page;
 }
 
 int main(int argc, char *argv[])

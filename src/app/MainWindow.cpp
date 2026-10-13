@@ -350,7 +350,7 @@ void MainWindow::toggleProxy()
                 if (proxyPage_ != nullptr) {
                     proxyPage_->refresh();
                 }
-            });
+            }, this);
     } else {
         if (selectedNodeId_.isEmpty()) {
             statusLabel_->setText(QStringLiteral("请先在控制台或节点池选择一个代理节点再启动"));
@@ -394,7 +394,7 @@ void MainWindow::toggleProxy()
                 if (proxyPage_ != nullptr) {
                     proxyPage_->refresh();
                 }
-            });
+            }, this);
     }
 }
 
@@ -528,7 +528,7 @@ void MainWindow::speedtestAll()
             if (nodesPage_ != nullptr) {
                 nodesPage_->refresh();
             }
-        });
+        }, this);
 }
 
 void MainWindow::selectTab(Tab tab)

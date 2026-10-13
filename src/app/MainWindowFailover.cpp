@@ -91,7 +91,7 @@ void MainWindow::switchProxyNode(const QString &nodeId, const QString &nodeName,
                 proxyPage_->requestFullReload();
                 proxyPage_->refresh();
             }
-        });
+        }, this);
 }
 
 void MainWindow::syncRouterConfig()

@@ -821,7 +821,7 @@ void SettingsPage::checkRemoteApi()
         } else {
             remoteApiStatusLabel_->setText(QStringLiteral("连接失败: %1").arg(resultBox->error()));
         }
-    });
+    }, this);
 }
 
 QWidget *createSettingsPage(App::AppContext &context, QWidget *parent)

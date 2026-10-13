@@ -443,7 +443,7 @@ void ApiPage::startApiServer()
     }, [this]() {
         refresh();
         statusFeedbackLabel_->setText(QStringLiteral("HTTP API 服务器已启动"));
-    });
+    }, this);
 }
 
 void ApiPage::stopApiServer()
@@ -458,7 +458,7 @@ void ApiPage::stopApiServer()
     }, [this]() {
         refresh();
         statusFeedbackLabel_->setText(QStringLiteral("HTTP API 服务器已关闭，端口已释放"));
-    });
+    }, this);
 }
 
 void ApiPage::savePublisherConfig()
@@ -528,7 +528,7 @@ void ApiPage::checkRemoteApi()
         } else {
             remoteApiStatusLabel_->setText(QStringLiteral("连接失败: %1").arg(resultBox->error()));
         }
-    });
+    }, this);
 }
 
 void ApiPage::publishAvailableNodes()
@@ -635,7 +635,7 @@ void ApiPage::publishAvailableNodes()
         } else {
             remoteApiStatusLabel_->setText(resultBox->error());
         }
-    });
+    }, this);
 }
 
 void ApiPage::copyToClipboard(const QString &text, const QString &feedback)

@@ -973,7 +973,7 @@ void ProxyPage::reloadConnections()
                 updateRuleHitsView();
             }
             refreshStatusCard();
-        });
+        }, this);
 }
 
 void ProxyPage::openSwitchLog()
@@ -1109,7 +1109,7 @@ void ProxyPage::closeConnection(const QString &id)
         [this]() {
             emit statusMessageRequested(QStringLiteral("已断开连接"));
             reloadConnections();
-        });
+        }, this);
 }
 
 void ProxyPage::closeAllConnections()
@@ -1133,7 +1133,7 @@ void ProxyPage::closeAllConnections()
             emit statusMessageRequested(QStringLiteral("已断开全部连接"));
             connections_.clear();
             updateConnectionsTable();
-        });
+        }, this);
 }
 
 QWidget *ProxyPage::buildRulesPanel()

@@ -155,7 +155,7 @@ TEST(ProxyPagePerf, unchangedRefreshRebuildsNothing)
     RecordProperty("skipRefreshMs", int(skipMs));
     RecordProperty("rebuildRefreshMs", int(rebuildMs));
 
-    page->deleteLater();
+    delete page;
 }
 
 /// 分栏切换 / 规则表 / 下拉框的成本量在纸面上，别靠手感。
