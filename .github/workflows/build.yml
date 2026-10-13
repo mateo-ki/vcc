@@ -192,7 +192,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 360
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
