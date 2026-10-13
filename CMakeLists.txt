@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Vcc VERSION 1.0.0 LANGUAGES CXX)
+project(Vcc VERSION 1.1.0 LANGUAGES CXX)
 
 # RC（资源脚本）只在 Windows 上有意义：Linux/macOS 上声明它会让 CMake 去找一个
 # 根本不存在的资源编译器。图标 .ico 也只进 Windows 的 vcc.rc。

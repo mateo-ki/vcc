@@ -51,8 +51,7 @@ ScalarKind classifyScalar(const QString& text)
     // 浮点：[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?
     {
         bool ok = false;
-        const double value = text.toDouble(&ok);
-        Q_UNUSED(value);
+        text.toDouble(&ok);
         if (ok && (text.contains(QLatin1Char('.')) || text.contains(QLatin1Char('e'))
                    || text.contains(QLatin1Char('E')))) {
             return ScalarKind::Float;

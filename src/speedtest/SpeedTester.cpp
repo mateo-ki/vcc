@@ -633,22 +633,60 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
 
     QElapsedTimer started;
     started.start();
-
-    // ---- 解析：每个不同的 (host, port) 仍然只查一次，但**不再先做完整轮才开测** ----
-    // 原来这里有一道 resolver.waitAll() 栅栏：所有唯一 host 解析完才开始 TCP 预筛，
-    // 而栅栏期间一个进度回调都没有 —— 上万个唯一节点时状态栏开局就停在
-    // "已完成 0/总数"好几分钟。resolveAddresses 走 QHostInfo::fromName（本线程
-    // getaddrinfo、不可取消，800ms 只是事后判定），域名节点一多就被放大。
-    // 现在改成惰性解析：memo 里没有就在这个节点的作业里自己查，结果由驱动线程在
-    // applier 里塞回 memo，后面的同 host 节点直接复用。这是对 Rust 的偏离
-    // （Rust 也是先解析完），但 Rust 那边同样有"开局静默几分钟"的表现。
+    // ---- 1. 并发 DNS 预解析（对齐 Rust resolve_targets_parallel） ----
+    // 纯 IP 节点 0 延时就绪，非 IP 唯一域名去重并发解析，避免 TCP 阶段被阻塞式 getaddrinfo 卡死
     QHash<QString, ResolvedAddresses> resolved;
+    QVector<QString> pendingHosts;
+    QSet<QString> seenHosts;
+    for (const Models::Node &node : nodes) {
+        const QString host = node.server;
+        const int port = node.port;
+        if (!HostUtil::isPublicProxyHost(host) || port == 0) {
+            continue;
+        }
+        const QString dnsKey = targetKey(host, port);
+        if (resolved.contains(dnsKey)) {
+            continue;
+        }
+        QHostAddress ipAddr;
+        if (ipAddr.setAddress(host)) {
+            resolved.insert(dnsKey, ResolvedAddresses::withValue({ipAddr}));
+        } else if (!seenHosts.contains(host)) {
+            seenHosts.insert(host);
+            pendingHosts.append(host);
+        }
+    }
 
-    // ---- TCP 预筛 ----
+    if (!pendingHosts.isEmpty()) {
+        const int dnsWorkers = qBound(1, qMin(concurrency, 64), int(pendingHosts.size()));
+        JobQueue dnsQueue(dnsWorkers);
+        QHash<QString, ResolvedAddresses> hostLookup;
+        for (const QString &host : pendingHosts) {
+            dnsQueue.submit([host, &hostLookup]() {
+                const ResolvedAddresses addr = resolveAddresses(host, kDnsLookupTimeoutMs);
+                return [host, addr, &hostLookup]() {
+                    hostLookup.insert(host, addr);
+                };
+            });
+        }
+        dnsQueue.waitAll();
+
+        for (const Models::Node &node : nodes) {
+            const QString host = node.server;
+            const int port = node.port;
+            const QString dnsKey = targetKey(host, port);
+            if (!resolved.contains(dnsKey) && hostLookup.contains(host)) {
+                resolved.insert(dnsKey, hostLookup.value(host));
+            }
+        }
+    }
+
+    // ---- 2. TCP 预筛 ----
     QVector<Models::LatencyResult> results;
     results.reserve(int(total));
     size_t done = 0;
     size_t okCount = 0;
+    qint64 lastReportElapsed = 0;
     {
         JobQueue inflight(concurrency);
         const int downloadTestMs = options.downloadTestMs;
@@ -659,33 +697,16 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
             const QString name = node.name;
             const QString host = node.server;
             const int port = node.port;
-            const QString dnsKey = targetKey(host, port);
-            // 只有真的要联网的 host 才查 DNS：私有/非法主机名过去也被这道 filter 挡在解析
-            // 阶段之外，保持一样（否则连 127.0.0.1 都会去走 QHostInfo —— 它要求有
-            // QCoreApplication 实例，无 GUI 的测试里会直接 Qt 断言）。
-            const bool needsDns = HostUtil::isPublicProxyHost(host) && port != 0;
-            const bool cached = needsDns && resolved.contains(dnsKey);
-            const ResolvedAddresses cachedAddresses = cached
-                ? resolved.value(dnsKey)
-                : resolutionFor(resolved, host, port);
+            const ResolvedAddresses addresses = resolutionFor(resolved, host, port);
             inflight.submit(
                 [&inflight, &networkLimit, &results, &done, &okCount, &progress,
-                 &started, &resolved, total, id, name, host, port, prefilterMs, downloadTestMs,
-                 measureDownload, dnsKey, needsDns, cached, cachedAddresses]() {
+                 &started, &lastReportElapsed, total, id, name, host, port, prefilterMs, downloadTestMs,
+                 measureDownload, addresses]() {
                     Permit permit(networkLimit);
-                    // 同 host 的多个节点会在同一批里并发提交，那时 memo 还没有值：
-                    // 允许重复查几次，换掉整轮静默的代价小得多。
-                    ResolvedAddresses addresses = cachedAddresses;
-                    if (needsDns && !cached) {
-                        addresses = resolveAddresses(host, kDnsLookupTimeoutMs);
-                    }
                     const ProbeOutcome outcome = SpeedTester::probeFullResolved(
                         host, port, int(prefilterMs), downloadTestMs, measureDownload, addresses);
-                    return [&results, &done, &okCount, &progress, &started, &resolved, total, id, name, host,
-                            port, dnsKey, needsDns, cached, addresses, outcome]() {
-                        if (needsDns && !cached) {
-                            resolved.insert(dnsKey, addresses);   // 只在驱动线程写
-                        }
+                    return [&results, &done, &okCount, &progress, &started, &lastReportElapsed, total, id, name, host,
+                            port, outcome]() {
                         Models::LatencyResult row;
                         row.id = id;
                         row.name = name;
@@ -703,8 +724,13 @@ Result<Models::SpeedTestSummary> SpeedTester::runSpeedtest(const QVector<Models:
                         if (outcome.ok) {
                             ++okCount;
                         }
-                        reportSpeedtestProgress(progress, SpeedTestPhase::TcpPrefilter, done, total,
-                                                okCount, started.elapsed());
+                        const qint64 currentElapsed = started.elapsed();
+                        if (done == 1 || done == total || (currentElapsed - lastReportElapsed >= 60)) {
+                            lastReportElapsed = currentElapsed;
+                            reportSpeedtestProgress(progress, SpeedTestPhase::TcpPrefilter, done, total,
+                                                    okCount, currentElapsed);
+                        }
+
                         // 运行中的成功计数：进度回调是每个节点一次的，不能再回头扫 results。
                         if (done % 500 == 0 || done == total) {
                             Log::info(QStringLiteral("speedtest progress done=%1 total=%2 ok=%3 "

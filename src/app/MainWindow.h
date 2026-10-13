@@ -62,6 +62,9 @@ public:
     /// 而不是自己钉一个档位（拆出来是为了能单测）。
     Speedtest::SpeedTestOptions speedtestAllOptions() const;
 
+    /// 唤出命令面板（Ctrl+K / Ctrl+P）
+    void showCommandPalette();
+
 protected:
     /// Ctrl+V 的全局导入。用事件过滤器而不是 QShortcut：快捷键一旦命中就会把按键吃掉，
     /// 输入框里的粘贴就没了（`tests/guiSourcesPage/PasteShortcutTests.cpp` 记着这个故障）。

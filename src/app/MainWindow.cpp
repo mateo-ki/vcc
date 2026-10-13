@@ -35,6 +35,7 @@
 #include "gui/Pages.h"
 #include "gui/ProxyPage.h"
 #include "gui/SourcesPage.h"
+#include "gui/CommandPalette.h"
 #include "gui/Theme.h"
 #include "gui/UiText.h"
 #include "gui/Widgets.h"
@@ -638,9 +639,14 @@ MainWindow::~MainWindow()
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    if (event->type() == QEvent::KeyPress && sourcesPage_ != nullptr) {
+    if (event->type() == QEvent::KeyPress) {
         auto *key = static_cast<QKeyEvent *>(event);
-        if (!key->isAutoRepeat() && key->matches(QKeySequence::Paste)) {
+        if (!key->isAutoRepeat() && (key->modifiers() & Qt::ControlModifier) &&
+            (key->key() == Qt::Key_K || key->key() == Qt::Key_P)) {
+            showCommandPalette();
+            return true;
+        }
+        if (!key->isAutoRepeat() && key->matches(QKeySequence::Paste) && sourcesPage_ != nullptr) {
             auto *widget = qobject_cast<QWidget *>(watched);
             // 只管本窗口里的粘贴：模态对话框是另一扇顶层窗，它自己的 Ctrl+V 不碰。
             if (widget != nullptr && widget->window() == this
@@ -653,6 +659,17 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::showCommandPalette()
+{
+    CommandPaletteHost host;
+    host.selectTab = [this](int tabIndex) { selectTab(static_cast<Tab>(tabIndex)); };
+    host.startNode = [this](const QString &nodeId) { startHandoffNode(nodeId); };
+    auto *palette = new CommandPalette(context_, std::move(host), this);
+    const QPoint center = geometry().center();
+    palette->move(center.x() - palette->width() / 2, qMax(geometry().top() + 80, center.y() - palette->height() / 2));
+    palette->show();
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

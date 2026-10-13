@@ -10,13 +10,9 @@ const char *kUpdateSpeed = R"(UPDATE nodes SET latency_ok=?, latency_ms=?, downl
                       latency_test_kind=?, latency_tested_at=?, updated_at=?
                WHERE id=?)";
 
-Status applyUpdate(Connection &connection, const QString &now, const Database::SpeedUpdate &item)
+Status applyUpdateStatement(Statement &statement, const QString &now, const Database::SpeedUpdate &item)
 {
-    Result<Statement> prepared = connection.prepare(QString::fromLatin1(kUpdateSpeed));
-    if (prepared.isErr()) {
-        return Status::failed(prepared.error());
-    }
-    Statement statement = prepared.takeValue();
+    statement.reset();
     statement.bindBool(1, item.ok);
     if (item.latencyMs.has_value()) {
         statement.bindInt64(2, *item.latencyMs);
@@ -35,6 +31,16 @@ Status applyUpdate(Connection &connection, const QString &now, const Database::S
     statement.bindText(8, item.id);
     const Result<bool> stepped = statement.step();
     return stepped.isErr() ? Status::failed(stepped.error()) : Status::succeeded();
+}
+
+Status applyUpdate(Connection &connection, const QString &now, const Database::SpeedUpdate &item)
+{
+    Result<Statement> prepared = connection.prepare(QString::fromLatin1(kUpdateSpeed));
+    if (prepared.isErr()) {
+        return Status::failed(prepared.error());
+    }
+    Statement statement = prepared.takeValue();
+    return applyUpdateStatement(statement, now, item);
 }
 
 QStringList placeholderList(int count)
@@ -149,8 +155,13 @@ Status Database::updateNodeSpeedsBatch(const QVector<SpeedUpdate> &items)
         }
         Transaction transaction(pool.value()->acquire());
         Connection *connection = transaction.connection();
+        Result<Statement> prepared = connection->prepare(QString::fromLatin1(kUpdateSpeed));
+        if (prepared.isErr()) {
+            return Status::failed(prepared.error());
+        }
+        Statement updateStmt = prepared.takeValue();
         for (const SpeedUpdate *item : grouped.value(key)) {
-            const Status updated = applyUpdate(*connection, now, *item);
+            const Status updated = applyUpdateStatement(updateStmt, now, *item);
             if (updated.isErr()) {
                 return updated;
             }

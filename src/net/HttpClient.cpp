@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <QSslConfiguration>
 #include <QSslError>
+#include <QThreadStorage>
 #include <QTimer>
 
 namespace Net {
@@ -69,9 +70,22 @@ QString transportError(const QNetworkReply *reply, bool timedOut)
 }
 
 /// 阻塞式请求。只能在 worker 线程调用：内部跑一个局部事件循环。
+struct ThreadLocalHttpState {
+    QNetworkAccessManager manager;
+    QString currentProxyUrl;
+    bool proxyConfigured = false;
+};
+
+static QThreadStorage<std::shared_ptr<ThreadLocalHttpState>> s_threadHttpState;
+
 Result<Response> send(const Request &request)
 {
-    QNetworkAccessManager manager;
+    auto state = s_threadHttpState.localData();
+    if (!state) {
+        state = std::make_shared<ThreadLocalHttpState>();
+        s_threadHttpState.setLocalData(state);
+    }
+    QNetworkAccessManager &manager = state->manager;
     QNetworkReply *reply = nullptr;
     // Qt 6.10 的 QNetworkRequest 没有 setProxy，只能设在 manager 上；
     // 这里每次调用一个 manager，正好等价于 reqwest 每次建一个带代理的 client。
@@ -99,10 +113,10 @@ Result<Response> send(const Request &request)
         proxy.setPort(port);
         hasProxy = true;
     }
-    if (hasProxy) {
-        manager.setProxy(proxy);
-    } else {
-        manager.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+    if (!state->proxyConfigured || state->currentProxyUrl != request.proxyUrl) {
+        state->currentProxyUrl = request.proxyUrl;
+        state->proxyConfigured = true;
+        manager.setProxy(hasProxy ? proxy : QNetworkProxy(QNetworkProxy::NoProxy));
     }
     if (!netRequest.hasRawHeader("Accept")) {
         netRequest.setRawHeader("Accept", "*/*");

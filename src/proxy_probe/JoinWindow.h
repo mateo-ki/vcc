@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QFuture>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QThreadPool>
@@ -12,7 +11,6 @@
 #include <functional>
 #include <utility>
 
-#include <QtConcurrentRun>
 
 namespace ProxyProbe {
 
@@ -82,10 +80,9 @@ public:
             }
             ++spawned_;
         }
-        const QFuture<void> ignored = QtConcurrent::run(&pool_, [this, job]() {
+        pool_.start([this, job]() {
             complete(job);
         });
-        Q_UNUSED(ignored);
         return true;
     }
 
