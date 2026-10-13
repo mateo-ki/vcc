@@ -25,7 +25,10 @@ env:
   # vcpkg has no `qt6` metaport any more (CI proved it: "ports/qt6: error: qt6 does not
   # exist"). The Qt6 modules this project finds are split ports: qtbase carries
   # Core/Gui/Widgets/Network/Concurrent, qtsvg carries Svg.
-  VCPKG_PORTS: qtbase qtsvg libarchive nlohmann-json openssl sqlite3 yaml-cpp zlib
+  # gtest is not optional here: tests/CMakeLists.txt line 1 is an unconditional
+  # find_package(GTest CONFIG REQUIRED). It never shows up locally because the local vcpkg
+  # tree has had gtest installed for months.
+  VCPKG_PORTS: qtbase qtsvg libarchive nlohmann-json openssl sqlite3 yaml-cpp zlib gtest
   # Binary cache: sources are separated by ';', the fields *inside* one source by ','.
   # Writing `files;<path>;readwrite` makes vcpkg read "readwrite" as the path and fail the
   # whole install step with "binary config 'files' requires at least one path argument".
@@ -46,6 +49,11 @@ jobs:
             ${{ env.VCC_VCPKG }}
             ${{ github.workspace }}/../vcpkg-cache
           key: vcpkg-classic-${{ runner.os }}-${{ env.VCC_VCPKG_SHA }}-${{ env.VCPKG_PORTS }}
+          # Adding a port changes the primary key. Without this prefix fallback that means
+          # recompiling Qt6 from source for another hour; with it the previous tree is
+          # restored and only the new port gets built.
+          restore-keys: |
+            vcpkg-classic-${{ runner.os }}-${{ env.VCC_VCPKG_SHA }}
 
       - name: Set up MSVC + Ninja + CMake on PATH
         uses: ilammy/msvc-dev-cmd@v1
@@ -153,6 +161,11 @@ jobs:
             ${{ env.VCC_VCPKG }}
             ${{ github.workspace }}/../vcpkg-cache
           key: vcpkg-classic-${{ runner.os }}-${{ env.VCC_VCPKG_SHA }}-${{ env.VCPKG_PORTS }}
+          # Adding a port changes the primary key. Without this prefix fallback that means
+          # recompiling Qt6 from source for another hour; with it the previous tree is
+          # restored and only the new port gets built.
+          restore-keys: |
+            vcpkg-classic-${{ runner.os }}-${{ env.VCC_VCPKG_SHA }}
 
       - uses: actions/setup-node@v4
         with:
