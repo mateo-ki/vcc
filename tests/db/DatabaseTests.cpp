@@ -427,3 +427,31 @@ TEST(ConnectionPoolReap, zeroTimeoutKeepsEveryConnectionWarm)
     EXPECT_EQ(pool->shrunkConnections(), 0);
     EXPECT_EQ(readProbe(*pool), QStringLiteral("alive"));
 }
+
+TEST(DatabaseScopes, emptyStringScopeScansAllSourcesAndUngrouped)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const QString path = QDir(directory.path()).filePath(QStringLiteral("vpn-parser.db"));
+
+    Result<std::shared_ptr<Database>> opened = Database::connect(path);
+    ASSERT_TRUE(opened.isOk()) << opened.error().toStdString();
+    auto db = opened.takeValue();
+
+    Models::CreateSource input;
+    input.name = QStringLiteral("test-src");
+    input.urlTemplate = QStringLiteral("http://example.com/sub");
+    auto created = db->createSource(input);
+    ASSERT_TRUE(created.isOk()) << created.error().toStdString();
+    const QString srcId = created.value().id;
+
+    // Passing QString() must return all sources plus ungrouped ("")
+    const QVector<QString> scopes = db->nodeScopes(QString());
+    EXPECT_TRUE(scopes.contains(srcId));
+    EXPECT_TRUE(scopes.contains(QString()));
+
+    // Passing an explicit sourceId should return only that source
+    const QVector<QString> singleScope = db->nodeScopes(srcId);
+    EXPECT_EQ(singleScope.size(), 1);
+    EXPECT_EQ(singleScope.first(), srcId);
+}

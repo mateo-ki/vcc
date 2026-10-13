@@ -177,7 +177,8 @@ TEST(Export, clash_vless_ws_tls)
             "sni": "example.com",
             "host": "example.com",
             "path": "/ws",
-            "encryption": "none"
+            "encryption": "none",
+            "ech": "cloudflare-ech.com+https://dns.alidns.com/dns-query"
         })"),
         QStringLiteral("vless://f775978b-6e22-41a8-ae5e-5f9779e6745f@1.1.1.1:443?type=ws"));
 
@@ -191,6 +192,7 @@ TEST(Export, clash_vless_ws_tls)
               Json("example.com"));
     EXPECT_EQ(field(proxies[0], "servername"), Json("example.com"));
     EXPECT_FALSE(hasField(proxies[0], "security"));
+    EXPECT_FALSE(hasField(proxies[0], "ech"));
 }
 
 TEST(Export, uri_rebuild_from_yaml_ss)
