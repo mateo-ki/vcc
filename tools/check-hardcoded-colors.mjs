@@ -10,9 +10,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const ROOTS = ['D:/project/cpp/vcc/src/gui', 'D:/project/cpp/vcc/src/app'];
+const ROOTS = ['src/gui', 'src/app'];
 // 调色板本身当然是唯一可以写颜色的地方。
-const ALLOW = new Set(['D:/project/cpp/vcc/src/gui/Theme.cpp']);
+const ALLOW = new Set(['src/gui/Theme.cpp']);
 
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -42,7 +42,7 @@ for (const dir of ROOTS) {
     for (const match of text.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)) {
       for (const hex of match[1].match(/#[0-9a-fA-F]{6}\b/g) ?? []) {
         const line = text.slice(0, match.index).split('\n').length;
-        violations.push(`${file.replace('D:/project/cpp/vcc/', '')}:${line}  ${hex}`);
+        violations.push(`${path.relative('.', file).replace(/\\/g, '/')}:${line}  ${hex}`);
       }
     }
   }
