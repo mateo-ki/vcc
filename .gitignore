@@ -14,3 +14,6 @@ data/
 tmp/
 *.log
 tmp_mem*.ps1
+
+# CI 用 vcpkg 与它的二进制缓存放在这里（actions/cache 只保存工作区内的路径）
+.ci/

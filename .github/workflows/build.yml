@@ -20,7 +20,11 @@ env:
   # Named VCC_VCPKG on purpose: ilammy/msvc-dev-cmd exports VCPKG_ROOT pointing at the
   # vcpkg bundled inside Visual Studio, which silently takes over from the tree we clone
   # and cache here.
-  VCC_VCPKG: ${{ github.workspace }}/../vcpkg-ci
+  #
+  # It also has to live *inside* the workspace: actions/cache silently refuses to save any
+  # path outside GITHUB_WORKSPACE, and the previous layout (workspace/../vcpkg-ci) meant
+  # this repo never stored a single cache entry - so every run paid a fresh ~1h Qt build.
+  VCC_VCPKG: ${{ github.workspace }}/.ci/vcpkg
   VCC_VCPKG_SHA: e456309491fd875487bf02b8a0dca76c1b1b00cc
   # vcpkg has no `qt6` metaport any more (CI proved it: "ports/qt6: error: qt6 does not
   # exist"). The Qt6 modules this project finds are split ports: qtbase carries
@@ -32,13 +36,18 @@ env:
   # Binary cache: sources are separated by ';', the fields *inside* one source by ','.
   # Writing `files;<path>;readwrite` makes vcpkg read "readwrite" as the path and fail the
   # whole install step with "binary config 'files' requires at least one path argument".
-  VCPKG_BINARY_SOURCES: files,${{ github.workspace }}/../vcpkg-cache,readwrite
+  VCPKG_BINARY_SOURCES: files,${{ github.workspace }}/.ci/vcpkg-cache,readwrite
 
 jobs:
   # ---------------------------------------------------------------- compile + full tests
   test:
     runs-on: windows-2022
     timeout-minutes: 360
+    # Commit comments are the only failure-output channel that is readable without
+    # repository rights: job logs and check-run annotations both need them.
+    permissions:
+      pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -47,7 +56,7 @@ jobs:
         with:
           path: |
             ${{ env.VCC_VCPKG }}
-            ${{ github.workspace }}/../vcpkg-cache
+            ${{ github.workspace }}/.ci/vcpkg-cache
           key: vcpkg-classic-${{ runner.os }}-${{ env.VCC_VCPKG_SHA }}-${{ env.VCPKG_PORTS }}
           # Adding a port changes the primary key. Without this prefix fallback that means
           # recompiling Qt6 from source for another hour; with it the previous tree is
@@ -117,7 +126,7 @@ jobs:
         shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
-          QT_PLUGIN_PATH: ${{ github.workspace }}/../vcpkg-ci/installed/x64-windows/debug/Qt6/plugins
+          QT_PLUGIN_PATH: ${{ github.workspace }}/.ci/vcpkg/installed/x64-windows/debug/Qt6/plugins
         run: |
           set +e
           ctest --test-dir build-ninja -j8 --output-on-failure > tests.log 2>&1
@@ -146,12 +155,31 @@ jobs:
             build.log
             tests.log
 
+      - name: Publish the failure log where anyone can read it
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          { echo "## test job, run $GITHUB_RUN_ID ($GITHUB_SHA)";
+            for f in install.log configure.log build.log tests.log; do
+              [ -f "$f" ] || continue
+              echo "===== $f ====="; tail -n 150 "$f"
+            done; } > digest.md
+          head -c 55000 digest.md > digest-body.md
+          gh api --method POST "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
+            -F body=@digest-body.md > /dev/null && echo "failure log posted as a commit comment"
+
   # ---------------------------------------------------------------- installer + release
   installer:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-2022
     timeout-minutes: 360
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -159,7 +187,7 @@ jobs:
         with:
           path: |
             ${{ env.VCC_VCPKG }}
-            ${{ github.workspace }}/../vcpkg-cache
+            ${{ github.workspace }}/.ci/vcpkg-cache
           key: vcpkg-classic-${{ runner.os }}-${{ env.VCC_VCPKG_SHA }}-${{ env.VCPKG_PORTS }}
           # Adding a port changes the primary key. Without this prefix fallback that means
           # recompiling Qt6 from source for another hour; with it the previous tree is
@@ -258,6 +286,22 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" build-rel/installer/*.exe \
             --verify-tag --title "VCC $GITHUB_REF_NAME" --generate-notes
+
+      - name: Publish the failure log where anyone can read it
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          { echo "## installer job, run $GITHUB_RUN_ID ($GITHUB_SHA)";
+            for f in install.log package.log; do
+              [ -f "$f" ] || continue
+              echo "===== $f ====="; tail -n 150 "$f"
+            done; } > digest.md
+          head -c 55000 digest.md > digest-body.md
+          gh api --method POST "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
+            -F body=@digest-body.md > /dev/null && echo "failure log posted as a commit comment"
 
       - name: Attach the step logs
         if: failure()
