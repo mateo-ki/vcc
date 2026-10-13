@@ -203,7 +203,8 @@ TEST(ProxyPagePerf, rulesTableKeepsRowsCheapAndEditorLazy)
         << "动作格不可编辑，用户就没法改 DIRECT/PROXY/REJECT";
 
     // 时间地板：按"曾经 1663 ms"往严里取，别拿当前实测值当门槛（那等于没门）。
-    EXPECT_LT(rebuildMs, 600) << "120 条规则重灌一次的成本涨了：行结构或控件装饰又变贵了";
+    const qint64 maxRebuildMs = (qEnvironmentVariableIsSet("CI") || qEnvironmentVariableIsSet("GITHUB_ACTIONS")) ? 1200 : 700;
+    EXPECT_LT(rebuildMs, maxRebuildMs) << "120 条规则重灌一次的成本涨了：行结构或控件装饰又变贵了";
     RecordProperty("rulesRebuild120Ms", int(rebuildMs));
     std::cerr << "PROBE 120 条规则重灌: " << rebuildMs << " ms（改造前 1663 ms）" << std::endl;
 

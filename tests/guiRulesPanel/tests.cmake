@@ -14,3 +14,5 @@ foreach(suite RulesPanelTests RuleHitsTests)
     set_tests_properties(vcc${suite} PROPERTIES ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=D:/vcpkg/installed/x64-windows/debug/Qt6/plugins")
 endforeach()
+
+set_tests_properties(vccRulesPanelTests PROPERTIES RUN_SERIAL TRUE)

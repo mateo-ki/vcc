@@ -21,4 +21,4 @@ endforeach()
 # vccProxyPerfTests 量的是墙钟时间地板（120 条规则重灌 <600ms、进内核管理同步部分 <60ms），
 # 和另外 7 个 GUI 套件并发跑时这些数必然被抢 CPU 打爆 —— 实测 -j8 下偶发红/卡住、
 # 单跑 1.3s 全绿。它必须串行跑。
-set_tests_properties(vccProxyPerfTests PROPERTIES RUN_SERIAL TRUE)
+set_tests_properties(vccProxyPageTests vccProxyPanelsTests vccProxyPerfTests PROPERTIES RUN_SERIAL TRUE)

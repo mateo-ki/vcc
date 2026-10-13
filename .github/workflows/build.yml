@@ -135,7 +135,7 @@ jobs:
           QT_PLUGIN_PATH: ${{ github.workspace }}/.ci/vcpkg/installed/x64-windows/debug/Qt6/plugins
         run: |
           set +e
-          ctest --test-dir build-ninja -j8 --output-on-failure > tests.log 2>&1
+          ctest --test-dir build-ninja --parallel 4 --output-on-failure > tests.log 2>&1
           status=$?
           tail -n 60 tests.log
           sh ci/annotate-fail.sh "$status" "ctest" tests.log

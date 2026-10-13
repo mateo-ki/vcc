@@ -7,3 +7,5 @@ vcc_target_options(vccNodesPageTests)
 add_test(NAME vccNodesPageTests COMMAND vccNodesPageTests)
 set_tests_properties(vccNodesPageTests PROPERTIES ENVIRONMENT
     "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=D:/vcpkg/installed/x64-windows/debug/Qt6/plugins")
+
+set_tests_properties(vccNodesPageTests PROPERTIES RUN_SERIAL TRUE)
