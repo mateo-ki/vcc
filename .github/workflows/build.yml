@@ -42,7 +42,7 @@ env:
   # Binary cache: sources are separated by ';', the fields *inside* one source by ','.
   # Writing `files;<path>;readwrite` makes vcpkg read "readwrite" as the path and fail the
   # whole install step with "binary config 'files' requires at least one path argument".
-  VCPKG_BINARY_SOURCES: files,${{ github.workspace }}/.ci/vcpkg-cache,readwrite
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
   # ---------------------------------------------------------------- compile + full tests
@@ -56,6 +56,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Enable GitHub Actions Cache for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Cache the vcpkg tree and its archives
         uses: actions/cache@v4
@@ -189,6 +196,13 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Enable GitHub Actions Cache for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - uses: actions/cache@v4
         with:
