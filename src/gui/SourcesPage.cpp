@@ -1,4 +1,5 @@
 #include "gui/SourcesPage.h"
+#include "gui/ProgressThrottle.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -19,6 +20,8 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPointer>
+#include <QCoreApplication>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStackedWidget>
@@ -1281,9 +1284,25 @@ void SourcesPage::fetchAllEnabled()
         Result<QVector<Models::FetchResult>>::withValue({}));
     const auto proxyUrlOpt = subscriptionProxyUrl();
 
-    context_.runAsync([db, tasks, proxyUrlOpt, resultBox]() {
+    // 拉取全程以前是零反馈：Collector 有进度回调（对应 Rust 的 fetch_all_enabled_with_progress），
+    // 但这里走的是 fetchAllEnabled() 那条 nullptr 版本，界面从点下去到整批结束一动不动。
+    // 进度按 80ms 合并，一条状态行文字足够，不必每源砸一次布局重排。
+    QPointer<SourcesPage> page(this);
+    auto throttle = std::make_shared<Gui::ProgressThrottle>();
+    const Collector::Collector::ProgressCallback reportProgress = [page, throttle](qint64 done, qint64 total) {
+        if (!throttle->shouldPost(size_t(done), size_t(total))) {
+            return;
+        }
+        QMetaObject::invokeMethod(qApp, [page, done, total]() {
+            if (page) {
+                page->showFetchProgress(done, total);
+            }
+        }, Qt::QueuedConnection);
+    };
+
+    context_.runAsync([db, tasks, proxyUrlOpt, resultBox, reportProgress]() {
         Collector::Collector collector(db, tasks);
-        auto res = collector.fetchAllEnabled();
+        auto res = collector.fetchAllEnabledWithProgress(reportProgress);
         if (res.isOk() && proxyUrlOpt.has_value()) {
             auto vec = res.takeValue();
             for (auto &item : vec) {
@@ -1304,16 +1323,18 @@ void SourcesPage::fetchAllEnabled()
         if (resultBox->isOk()) {
             fetchResults_ = resultBox->takeValue();
             populateResultsTable();
-            emit statusMessageRequested(QStringLiteral("全部订阅源拉取完成，共 %1 个结果").arg(fetchResults_.size()));
-            QMessageBox::information(this, QStringLiteral("拉取完成"),
-                QStringLiteral("共完成 %1 个订阅源的拉取，详情可切换至「订阅拉取结果」标签查看。").arg(fetchResults_.size()));
+            emit statusMessageRequested(QStringLiteral("拉取完成：共 %1 个订阅源，详情看「订阅拉取结果」")
+                                            .arg(fetchResults_.size()));
         } else {
             emit statusMessageRequested(QStringLiteral("拉取失败: %1").arg(resultBox->error()));
-            QMessageBox::warning(this, QStringLiteral("拉取失败"),
-                QStringLiteral("拉取失败: %1").arg(resultBox->error()));
         }
         reloadSources();
     }, this);
+}
+
+void SourcesPage::showFetchProgress(qint64 done, qint64 total)
+{
+    emit statusMessageRequested(QStringLiteral("正在拉取订阅源 %1 / %2...").arg(done).arg(total));
 }
 
 void SourcesPage::fetchAllViaProxy()
@@ -1340,9 +1361,22 @@ void SourcesPage::fetchAllViaProxy()
     auto resultBox = std::make_shared<Result<QVector<Models::FetchResult>>>(
         Result<QVector<Models::FetchResult>>::withValue({}));
 
-    context_.runAsync([db, tasks, proxyUrl, resultBox]() {
+    QPointer<SourcesPage> page(this);
+    auto throttle = std::make_shared<Gui::ProgressThrottle>();
+    const Collector::Collector::ProgressCallback reportProgress = [page, throttle](qint64 done, qint64 total) {
+        if (!throttle->shouldPost(size_t(done), size_t(total))) {
+            return;
+        }
+        QMetaObject::invokeMethod(qApp, [page, done, total]() {
+            if (page) {
+                page->showFetchProgress(done, total);
+            }
+        }, Qt::QueuedConnection);
+    };
+
+    context_.runAsync([db, tasks, proxyUrl, resultBox, reportProgress]() {
         Collector::Collector collector(db, tasks);
-        *resultBox = collector.fetchAllEnabledWithProxy(proxyUrl, nullptr);
+        *resultBox = collector.fetchAllEnabledWithProxy(proxyUrl, reportProgress);
     }, [this, resultBox]() {
         busy_ = false;
         fetchProxyBtn_->setEnabled(true);
@@ -1350,13 +1384,10 @@ void SourcesPage::fetchAllViaProxy()
         if (resultBox->isOk()) {
             fetchResults_ = resultBox->takeValue();
             populateResultsTable();
-            emit statusMessageRequested(QStringLiteral("代理拉取完成，共 %1 个结果").arg(fetchResults_.size()));
-            QMessageBox::information(this, QStringLiteral("代理拉取完成"),
-                QStringLiteral("通过代理完成 %1 个订阅源拉取，详情可切换至「订阅拉取结果」查看。").arg(fetchResults_.size()));
+            emit statusMessageRequested(QStringLiteral("代理拉取完成：共 %1 个订阅源，详情看「订阅拉取结果」")
+                                            .arg(fetchResults_.size()));
         } else {
             emit statusMessageRequested(QStringLiteral("代理拉取失败: %1").arg(resultBox->error()));
-            QMessageBox::warning(this, QStringLiteral("代理拉取失败"),
-                QStringLiteral("代理拉取失败: %1").arg(resultBox->error()));
         }
         reloadSources();
     }, this);
@@ -1395,15 +1426,10 @@ void SourcesPage::fetchOne(const QString &sourceId)
             populateResultsTable();
             emit statusMessageRequested(QStringLiteral("拉取完成: %1 (%2 个节点)").arg(res.sourceName).arg(res.nodeCount));
             if (res.success) {
-                QMessageBox::information(this, QStringLiteral("拉取成功"),
-                    QStringLiteral("订阅源「%1」拉取完成，解析到 %2 个节点。").arg(res.sourceName).arg(res.nodeCount));
-                // 弹窗关掉之后再报给外壳：MainWindow 决定要不要接着自动测这一源的节点
-                // （设置里"自动测速"开着才测）。放在弹窗后面是为了让测速进度看得见，
-                // 而不是被一个模态框挡几十秒。
+                // 原来这里是一个模态框，关掉之后才 emit nodesFetchedForSource ——
+                // 那等于让自动测速排在"等你点确定"后面。状态行已经把结果说清楚了。
                 emit nodesFetchedForSource(res.sourceId, res.nodeCount);
             } else {
-                QMessageBox::warning(this, QStringLiteral("拉取未获取节点"),
-                    QStringLiteral("订阅源「%1」拉取未获得节点: %2").arg(res.sourceName).arg(res.message));
             }
         } else {
             emit statusMessageRequested(QStringLiteral("拉取失败: %1").arg(resultBox->error()));

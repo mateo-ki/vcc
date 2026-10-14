@@ -1,7 +1,8 @@
 # 窗口骨架 + 主题装配。这些测试用 offscreen 平台跑（见 add_test 的 ENVIRONMENT）：
 # main() 会先清孤儿内核，而开发时本机可能有别的实例的内核在跑。
 qt_add_executable(vccGuiTests gui/ShellTests.cpp gui/IconSheetTests.cpp gui/KernelRoutingTests.cpp
-    gui/AboutPageTests.cpp)
+    gui/AboutPageTests.cpp
+    gui/ProgressThrottleTests.cpp)
 target_include_directories(vccGuiTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(vccGuiTests PRIVATE vccApp vccGui vccDb vccProxy vccTasks vccCore
     Qt6::Core Qt6::Gui Qt6::Widgets GTest::gtest)

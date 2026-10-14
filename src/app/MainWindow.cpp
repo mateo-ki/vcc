@@ -34,6 +34,7 @@
 #include "gui/NodesPage.h"
 #include "gui/Page.h"
 #include "gui/Pages.h"
+#include "gui/ProgressThrottle.h"
 #include "gui/ProxyPage.h"
 #include "gui/SourcesPage.h"
 #include "gui/CommandPalette.h"
@@ -44,6 +45,8 @@
 #include "speedtest/SpeedTester.h"
 
 namespace {
+
+
 
 constexpr int kSidebarWidth = 220;
 
@@ -508,8 +511,14 @@ void MainWindow::speedtestAll()
     context_.runAsync(
         [ctx = &context_, guard, options, outcome]() {
             Speedtest::SpeedTester tester(ctx->databasePtr(), *ctx->tasksPtr());
-            *outcome = tester.testAllSourcesWithProgress(options, [guard](size_t done, size_t total) {
+            // 进度合并：TCP 预筛段那边有 60ms 的闸门，真代理验证段是每完成一颗就回调
+            // 一次（并行内核时三条车道各自报）。全量测速下那是每秒上百条 GUI 事件，每条
+            // 都要格式化一句 + setText + 让状态条重排一次 —— 界面卡不卡就在这。
+            // 最后一颗必须投出去，不能因为"离上次不到 80ms"被吞掉。
+            auto throttle = std::make_shared<Gui::ProgressThrottle>();
+            *outcome = tester.testAllSourcesWithProgress(options, [guard, throttle](size_t done, size_t total) {
                 if (guard.isNull()) return;
+                if (!throttle->shouldPost(done, total)) return;
                 QMetaObject::invokeMethod(guard.data(), [guard, done, total]() {
                     if (guard.isNull() || guard->statusLabel_ == nullptr) return;
                     guard->statusLabel_->setText(Gui::UiText::speedAllProgress()
@@ -638,9 +647,16 @@ void MainWindow::updateTray()
 
     // 故障自动切换的心跳。Rust 那边是"每帧调 check_failover、闸门在函数里"，这里 5 秒
     // 看一眼的效果一样，而且不用跟着重绘转。
-    failoverTimer_ = new QTimer(this);
-    connect(failoverTimer_, &QTimer::timeout, this, &MainWindow::checkFailover);
-    failoverTimer_->start(5000);
+    //
+    // 只能建一次：这个函数挂在 updateStatusControls() 尾部，而它有十来个调用点
+    // （启动、切代理、测速收尾…）。以前每调一次就 new 一条 5s 定时器，老的既不停也不删
+    // （还是 this 的子对象），于是心跳越点越多，每一条都要在 GUI 线程抢一次
+    // proxy().status()。
+    if (failoverTimer_ == nullptr) {
+        failoverTimer_ = new QTimer(this);
+        connect(failoverTimer_, &QTimer::timeout, this, &MainWindow::checkFailover);
+        failoverTimer_->start(5000);
+    }
 }
 
 MainWindow::~MainWindow()

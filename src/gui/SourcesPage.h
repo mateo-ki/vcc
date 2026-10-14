@@ -59,6 +59,10 @@ public slots:
     void fetchOneViaProxy(const QString &sourceId);
     /// 拉取单源之后只重写它那一行（其余行的控件对象保持不变）。定位不到就退回整表刷新。
     void refreshSourceRow(const QString &sourceId);
+
+    /// 拉取进度落到状态行（由 collector 的进度回调经 GUI 线程调用）。
+    /// 公开是因为进度闭包在 worker 线程上，只能持一个 QPointer 投回这里再调。
+    void showFetchProgress(qint64 done, qint64 total);
     void toggleSourceEnabled(const QString &sourceId, bool enabled);
     void toggleSourcePush(const QString &sourceId, bool pushDisabled);
     void deleteSource(const QString &sourceId);
