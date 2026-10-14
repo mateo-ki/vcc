@@ -508,10 +508,23 @@ void AboutPage::startDownload()
     const QString fileName = Core::safeInstallerFileName(release_.assetName, release_.version);
     const QString target = QDir(directory).filePath(fileName);
 
+    const QString expectedSha = digestHex(release_.assetDigest);
     if (QFile::exists(target)) {
+        // "下过了"不能直接收工：要么它就是能装的那份（校验过 -> 继续问要不要装），
+        // 要么是一半/被换过的字节（删掉重下）。只报一句"已经下载过了"会把安装这一步
+        // 永远走不到。
+        const Result<QString> hash = Crypto::sha256HexOfFile(target);
+        if (!expectedSha.isEmpty() && (hash.isErr() || hash.value().toLower() != expectedSha)) {
+            QFile::remove(target);
+            statusLabel_->setText(QStringLiteral("本地那份校验不过，已删除，重新点一次下载。"));
+            return;
+        }
         savedPath_ = target;
         openFolderButton_->setEnabled(true);
-        statusLabel_->setText(QStringLiteral("已经下载过了：%1").arg(target));
+        statusLabel_->setText(expectedSha.isEmpty()
+            ? QStringLiteral("已经下载过了：%1").arg(target)
+            : QStringLiteral("已经下载过并校验通过：%1").arg(target));
+        offerInstall();
         return;
     }
 
@@ -529,7 +542,6 @@ void AboutPage::startDownload()
     }
     lastChannel_ = *chosen;
     const DownloadPlan plan = planForDownload(*chosen, release_.assetUrl, kernelMixed, systemProxy);
-    const QString expectedSha = digestHex(release_.assetDigest);
     if (plan.url != release_.assetUrl && expectedSha.isEmpty()) {
         // 镜像站只是把字节搬过来，它同时也有能力换掉字节。没有 GitHub 给的校验值，
         // 就没有任何东西能证明落盘的那个 exe 是 GitHub 上那个。
