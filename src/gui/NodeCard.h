@@ -5,8 +5,10 @@
 
 #include <QColor>
 #include <QFont>
+#include <QFontMetrics>
 #include <QFrame>
 #include <QLabel>
+#include <QRect>
 #include <QSize>
 #include <QString>
 
@@ -31,6 +33,15 @@ enum class NodeCardState {
     Running,
 };
 
+/// 第二行三段的落位。country 是空矩形表示这一行放不下国家，那一整段就不画 ——
+/// 以前国家的矩形一路伸到行右边缘，卡窄时国旗+国名直接压在右对齐的延迟字上
+/// （他 2026-10-15 报的"控制台卡片 US 和延迟互相覆盖"）。
+struct NodeCardDetailRow {
+    QRect protocol;
+    QRect country;
+    QRect latency;
+};
+
 /// 卡片外观：圆角 + 描边 + 三态底色，全部 QPainter 画，不走 QSS。
 class NodeCardFrame : public QFrame {
     // Q_OBJECT 是为了让外壳的 eventFilter 能 qobject_cast 出卡片类型、测试也能
@@ -53,6 +64,16 @@ public:
     /// 两行文字 + 上下内边距（与 paintEvent 共用同一套字号/边距常量）。
     QSize sizeHint() const override;
 
+    /// 上一次 paintEvent 真正落位的第二行三段矩形（布局断言用，见 NodeCardTests）。
+    NodeCardDetailRow detailRowRects() const { return lastDetailRow_; }
+
+    /// 第二行的落位：延迟先占住右边，协议与国家只在剩下的空间里排，
+    /// 放不下就省略号截断、国家那段可以整段消失。
+    static NodeCardDetailRow layoutDetailRow(const QRect &row, const QFontMetrics &detailMetrics,
+                                             const QFontMetrics &latencyMetrics,
+                                             const QString &protocol, const QString &country,
+                                             const QString &latency);
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     // hover 换色：WA_Hover 收到进入/离开事件后要重画（样式表里的 :hover 就是这个语义）。
@@ -71,6 +92,7 @@ private:
     Skin skinForState() const;
 
     NodeCardState state_ = NodeCardState::Normal;
+    NodeCardDetailRow lastDetailRow_;
     QString nodeId_;
     QString nodeName_;
     // 卡片不养任何子控件：四段文字在 paintEvent 里画（子 QLabel 会被应用级

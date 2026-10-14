@@ -201,6 +201,12 @@ QPushButton *pagerButton(ProxyPage &page, const char *name)
     return nullptr;
 }
 
+QString rectText(const QRect &rect)
+{
+    return QStringLiteral("(%1,%2 %3x%4)").arg(rect.x()).arg(rect.y()).arg(rect.width())
+        .arg(rect.height());
+}
+
 QStringList cardNames(ProxyPage &page)
 {
     QStringList out;
@@ -485,6 +491,57 @@ TEST(NodeCardTests, pagerLabelUsesTheRustWordings)
     EXPECT_TRUE(next->isVisibleTo(&page));
     EXPECT_EQ(next->text().toStdString(), UiText::pagerNext().toStdString());
     EXPECT_EQ(prev->text().toStdString(), UiText::pagerPrev().toStdString());
+}
+
+/// 控制台/节点池共用的那张卡：第二行是「协议 · 国旗+国名 · 右对齐延迟」。
+/// 卡窄时国名不许伸到延迟字下面（他 2026-10-15 报的"US 美国和延迟字互相覆盖"），
+/// 延迟是唯一不许截断的一段，放不下就让国名整段消失。
+/// 断言读的是 paintEvent 真正用的那三份矩形，不在测试里重算一遍布局。
+TEST(NodeCardTests, detailRowNeverOverlapsTheLatencyText)
+{
+    const QVector<QString> protocols = {QStringLiteral("ss"), QStringLiteral("vmess"),
+                                        QStringLiteral("hysteria2")};
+    const QVector<int> widths = {150, 170, 200, 260, 420};
+    Proxy::ProxyRuntimeStatus status;
+    const QString shotDir = qEnvironmentVariable("VCC_NODECARD_SHOT");
+
+    for (const QString &protocol : protocols) {
+        for (const int width : widths) {
+            ProxyViewRow row;
+            row.node.id = QStringLiteral("n-overlap");
+            row.node.protocol = protocol;
+            row.node.name = QStringLiteral("NODE");
+            row.node.country = QStringLiteral("US");
+            row.country = QStringLiteral("US");
+            row.node.latencyMs = qint64(1234);
+            row.node.latencyOk = std::optional<bool>(true);
+            row.node.latencyTestKind = QStringLiteral("google_proxy");
+
+            NodeCardFrame card;
+            card.bind(row, status, QString());
+            card.resize(width, 64);
+            const QPixmap shot = card.grab(); // 走一次 paintEvent，让它把落位记下来
+            const NodeCardDetailRow rects = card.detailRowRects();
+            const QString where = QStringLiteral("%1 @%2px").arg(protocol).arg(width);
+
+            ASSERT_GT(rects.latency.width(), 0) << where.toStdString();
+            EXPECT_TRUE(rects.country.isEmpty() || rects.country.right() < rects.latency.left())
+                << "国名压到延迟字上: " << where.toStdString() << " country="
+                << rectText(rects.country).toStdString() << " latency="
+                << rectText(rects.latency).toStdString();
+            EXPECT_TRUE(rects.protocol.isEmpty() || rects.protocol.right() < rects.latency.left())
+                << "协议段伸进了延迟: " << where.toStdString();
+            // 三段都不许出卡片：左右各 14px 内边距，留 1px 描边余量。
+            EXPECT_GE(rects.protocol.left(), 14) << where.toStdString();
+            EXPECT_LE(rects.latency.right(), width - 14) << where.toStdString();
+
+            if (!shotDir.isEmpty()) {
+                shot.save(QDir(shotDir).filePath(QStringLiteral("nodecard-%1-%2.png")
+                                                     .arg(protocol)
+                                                     .arg(width)));
+            }
+        }
+    }
 }
 
 int main(int argc, char *argv[])

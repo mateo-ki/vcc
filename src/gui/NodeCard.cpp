@@ -58,6 +58,8 @@ QColor slotColor(const Theme::Palette &pal, const QString &slot)
     return pal.textPrimary;
 }
 constexpr int kBadgeRadius = 4;
+/// 国家那段至少要有这点宽度才值得画：再窄就整段不画，别挤成一截看不懂的残字。
+constexpr int kMinCountryPx = 24;
 
 /// 延迟文案的角色名（NodeText 的 latencyText 给的是 QSS objectName）落到 Palette 槽名。
 /// 也顺手把"控制台的延迟分档色和节点池不是一套"结束（旧控制台内联了 <150/<350 三档，
@@ -175,6 +177,24 @@ QSize NodeCardFrame::sizeHint() const
     return QSize(160, kMarginV * 2 + nameMetrics.height() + kLineGap + detailMetrics.height());
 }
 
+NodeCardDetailRow NodeCardFrame::layoutDetailRow(const QRect &row, const QFontMetrics &detailMetrics,
+                                                 const QFontMetrics &latencyMetrics,
+                                                 const QString &protocol, const QString &country,
+                                                 const QString &latency)
+{
+    // 延迟先占住右边（它是唯一不许截断的一段），剩下的高度空间给协议+国家。
+    const int latencyWidth = latencyMetrics.horizontalAdvance(latency);
+    NodeCardDetailRow out;
+    out.latency = QRect(row.right() - latencyWidth + 1, row.y(), latencyWidth, row.height());
+    const int middleRight = out.latency.left() - kColumnGap;
+    out.protocol = QRect(row.left(), row.y(), qMax(0, middleRight - row.left()), row.height());
+    const int countryLeft = row.left() + detailMetrics.horizontalAdvance(protocol) + kColumnGap;
+    out.country = country.isEmpty() || middleRight - countryLeft < kMinCountryPx
+        ? QRect()
+        : QRect(countryLeft, row.y(), middleRight - countryLeft, row.height());
+    return out;
+}
+
 void NodeCardFrame::setState(NodeCardState state)
 {
     if (state == state_) {
@@ -231,22 +251,27 @@ void NodeCardFrame::paintEvent(QPaintEvent *event)
 
     const QFont detailFont = cardFont(this, kDetailPx, false);
     const QFontMetrics detailMetrics(detailFont);
+    const QFont latencyFont = cardFont(this, kDetailPx, true);
+    const QFontMetrics latencyMetrics(latencyFont);
+    const QRect detailRow(kMarginH, y, textWidth, detailMetrics.height());
+    lastDetailRow_ = layoutDetailRow(detailRow, detailMetrics, latencyMetrics, protocolText_,
+                                     countryText_, latencyText_);
+
     painter.setFont(detailFont);
     painter.setPen(pal.muted);
-    const QRect detailRow(kMarginH, y, textWidth, detailMetrics.height());
-    painter.drawText(detailRow, Qt::AlignLeft | Qt::AlignVCenter, protocolText_);
-    int left = kMarginH + detailMetrics.horizontalAdvance(protocolText_);
-    if (!countryText_.isEmpty()) {
-        left += kColumnGap;
+    painter.drawText(lastDetailRow_.protocol, Qt::AlignLeft | Qt::AlignVCenter,
+                     detailMetrics.elidedText(protocolText_, Qt::ElideRight,
+                                              lastDetailRow_.protocol.width()));
+    if (lastDetailRow_.country.width() > 0) {
         painter.setPen(pal.textSecondary);
-        painter.drawText(QRect(left, y, detailRow.right() - left, detailMetrics.height()),
-                         Qt::AlignLeft | Qt::AlignVCenter, countryText_);
+        painter.drawText(lastDetailRow_.country, Qt::AlignLeft | Qt::AlignVCenter,
+                         detailMetrics.elidedText(countryText_, Qt::ElideRight,
+                                                  lastDetailRow_.country.width()));
     }
     // 延迟右对齐；分档色走 Palette 槽名（success/warning/danger/textSecondary）。
-    const QColor latencyColor = slotColor(pal, latencySlot_);
-    painter.setPen(latencyColor);
-    painter.setFont(cardFont(this, kDetailPx, true));
-    painter.drawText(detailRow, Qt::AlignRight | Qt::AlignVCenter, latencyText_);
+    painter.setFont(latencyFont);
+    painter.setPen(slotColor(pal, latencySlot_));
+    painter.drawText(lastDetailRow_.latency, Qt::AlignLeft | Qt::AlignVCenter, latencyText_);
 }
 
 void NodeCardFrame::enterEvent(QEnterEvent *event)
