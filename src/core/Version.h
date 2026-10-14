@@ -20,12 +20,20 @@ int compareVersions(const QString &left, const QString &right);
 /// latest 比 current 新才谈得上"有更新"。
 bool isUpdateAvailable(const QString &latestTag, const QString &currentVersion);
 
-/// GitHub Releases/latest 里我们真正要的两件事：版本号与发布页地址。
+/// GitHub Releases/latest 里我们真正要的东西：版本号、发布页，以及安装包那条直链。
 struct Release {
     QString version;
     QString url;
+    QString assetName;
+    QString assetUrl;
+    quint64 assetSize = 0;
 };
 
 Result<Release> releaseFromJsonText(const QString &jsonText);
+
+/// 资产名是外部输入，直接拿来当文件名就等于让远端决定我们在哪写文件
+/// （"..\..\x.exe" 这种是真的能构造出来的）。所以：只接受纯 ASCII 的 .exe 名字，
+/// 其余一律用版本号重拼一个。
+QString safeInstallerFileName(const QString &assetName, const QString &version);
 
 } // namespace Core

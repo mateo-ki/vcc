@@ -48,6 +48,16 @@ bool hasLabelWith(Gui::AboutDialog &dialog, const QString &fragment)
     return false;
 }
 
+QPushButton *buttonByLabel(Gui::AboutDialog &dialog, const QString &label)
+{
+    for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
+        if (button->text() == label) {
+            return button;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
 
 TEST(AboutDialog, ShowsTheBuiltInVersionAndTheRepository)
@@ -67,7 +77,7 @@ TEST(AboutDialog, ShowsTheBuiltInVersionAndTheRepository)
     EXPECT_FALSE(findButtonText(dialog, QStringLiteral("打开发布页")).isEmpty());
 }
 
-TEST(AboutDialog, OpensNoThingUntilAnUpdateCheckLanded)
+TEST(AboutDialog, DownloadStaysDarkUntilThereIsSomethingToGrab)
 {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());
@@ -80,8 +90,13 @@ TEST(AboutDialog, OpensNoThingUntilAnUpdateCheckLanded)
             EXPECT_FALSE(button->isEnabled()) << "还没检查过就给了一个指向未知的按钮";
         }
     }
-    dialog.showUpdateResult(QStringLiteral("已是最新版 1.2.0"),
-                           QStringLiteral("https://github.com/mateo-ki/vcc/releases/tag/v1.2.0"));
+    Core::Release release;
+    release.version = QStringLiteral("1.2.0");
+    release.url = QStringLiteral("https://github.com/mateo-ki/vcc/releases/tag/v1.2.0");
+    release.assetName = QStringLiteral("VCC-1.2.0-win64.exe");
+    release.assetUrl = QStringLiteral("https://objects.example/VCC-1.2.0-win64.exe");
+    release.assetSize = 4096;
+    dialog.showUpdateResult(QStringLiteral("已是最新版 1.2.0"), release);
     for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
         if (button->text() == QStringLiteral("打开发布页")) {
             EXPECT_TRUE(button->isEnabled());
@@ -144,4 +159,50 @@ TEST(AboutDialog, LaysOutEveryRowWhenShown)
     }
     EXPECT_GE(visibleButtons, 2) << "检查更新与关闭至少得是能点的";
     dialog.hide();
+}
+
+/// 下载那颗只在"确有新版、且这条发布真挂了安装包"时亮；缺一个条件都不该亮。
+TEST(AboutDialog, EnablesDownloadOnlyWhenANewerReleaseCarriesAnInstaller)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+
+    Gui::AboutDialog dialog(*context);
+    QPushButton *download = buttonByLabel(dialog, QStringLiteral("下载新版本"));
+    ASSERT_TRUE(download != nullptr);
+
+    Core::Release same;
+    same.version = Core::appVersion();
+    same.assetUrl = QStringLiteral("https://objects.example/VCC-installer.exe");
+    dialog.showUpdateResult(QStringLiteral("已是最新版"), same);
+    EXPECT_FALSE(download->isEnabled()) << "本机已经是最新，不该给一颗能点的下载";
+
+    Core::Release newerWithoutAsset;
+    newerWithoutAsset.version = QStringLiteral("999.0.0");
+    dialog.showUpdateResult(QStringLiteral("发现新版本 999.0.0"), newerWithoutAsset);
+    EXPECT_FALSE(download->isEnabled()) << "这条发布根本没有安装包";
+
+    Core::Release newer;
+    newer.version = QStringLiteral("999.0.0");
+    newer.assetName = QStringLiteral("VCC-999.0.0-win64.exe");
+    newer.assetUrl = QStringLiteral("https://objects.example/VCC-999.0.0-win64.exe");
+    dialog.showUpdateResult(QStringLiteral("发现新版本 999.0.0"), newer);
+    EXPECT_TRUE(download->isEnabled());
+}
+
+/// 目标文件名来自远端的资产名，不能让它把文件写到 updates/ 以外去。
+TEST(AboutDialog, KeepsTheDownloadedFileNameInsideTheTargetDirectory)
+{
+    EXPECT_EQ(Gui::AboutDialog::downloadTarget(QStringLiteral("updates"),
+                                               QStringLiteral("VCC-1.2.0-win64.exe"),
+                                               QStringLiteral("1.2.0")),
+              QStringLiteral("updates/VCC-1.2.0-win64.exe"));
+    const QString escaped = Gui::AboutDialog::downloadTarget(
+        QStringLiteral("updates"), QStringLiteral("../../../windows/system32/evil.exe"),
+        QStringLiteral("1.2.0"));
+    EXPECT_FALSE(escaped.contains(QStringLiteral(".."))) << escaped.toStdString();
+    EXPECT_TRUE(escaped.endsWith(QStringLiteral(".exe"))) << escaped.toStdString();
+    EXPECT_TRUE(escaped.startsWith(QStringLiteral("updates/"))) << escaped.toStdString();
 }

@@ -58,3 +58,55 @@ TEST(VersionReleaseJson, RejectsSomethingThatIsNotJsonAtAll)
     const Result<Core::Release> parsed = Core::releaseFromJsonText(QStringLiteral("<html>502</html>"));
     ASSERT_TRUE(parsed.isErr());
 }
+
+TEST(VersionReleaseJson, PrefersOurOwnInstallerAsset)
+{
+    const QString body = QStringLiteral(R"({"tag_name":"v2.0.0","html_url":"https://x/y","assets":[
+        {"name":"source.zip","browser_download_url":"https://x/zip","size":999999},
+        {"name":"VCC-2.0.0-win64.exe","browser_download_url":"https://x/ours","size":4000},
+        {"name":"other-2.0.0.exe","browser_download_url":"https://x/bigger","size":9000}]})");
+    const Result<Core::Release> parsed = Core::releaseFromJsonText(body);
+    ASSERT_TRUE(parsed.isOk()) << parsed.error().toStdString();
+    EXPECT_EQ(parsed.value().assetName, QStringLiteral("VCC-2.0.0-win64.exe"));
+    EXPECT_EQ(parsed.value().assetUrl, QStringLiteral("https://x/ours"));
+    EXPECT_EQ(parsed.value().assetSize, quint64(4000));
+}
+
+TEST(VersionReleaseJson, FallsBackToTheBiggestExeWhenNothingLooksOurs)
+{
+    const QString body = QStringLiteral(R"({"tag_name":"v2.0.0","assets":[
+        {"name":"small.exe","browser_download_url":"https://x/small","size":10},
+        {"name":"big.exe","browser_download_url":"https://x/big","size":9000},
+        {"name":"notes.txt","browser_download_url":"https://x/notes","size":100000}]})");
+    const Result<Core::Release> parsed = Core::releaseFromJsonText(body);
+    ASSERT_TRUE(parsed.isOk()) << parsed.error().toStdString();
+    EXPECT_EQ(parsed.value().assetUrl, QStringLiteral("https://x/big"));
+}
+
+TEST(VersionReleaseJson, LeavesTheAssetEmptyWhenTheReleaseHasNoInstaller)
+{
+    const QString body = QStringLiteral(R"({"tag_name":"v2.0.0","assets":[]})");
+    const Result<Core::Release> parsed = Core::releaseFromJsonText(body);
+    ASSERT_TRUE(parsed.isOk()) << parsed.error().toStdString();
+    EXPECT_TRUE(parsed.value().assetUrl.isEmpty());
+}
+
+TEST(VersionFileName, KeepsOnlyPlainAsciiExeNamesAndRejectsPaths)
+{
+    EXPECT_EQ(Core::safeInstallerFileName(QStringLiteral("VCC-1.2.0-win64.exe"),
+                                          QStringLiteral("1.2.0")),
+              QStringLiteral("VCC-1.2.0-win64.exe"));
+    // 远端给的名字是外部输入：带路径分隔符、带 ..、不是 .exe、空的，一律换掉。
+    EXPECT_EQ(Core::safeInstallerFileName(QStringLiteral("../../windows/a.exe"),
+                                          QStringLiteral("1.2.0")),
+              QStringLiteral("VCC-1.2.0-win64.exe"));
+    EXPECT_EQ(Core::safeInstallerFileName(QStringLiteral("a\\b.exe"), QStringLiteral("1.2.0")),
+              QStringLiteral("VCC-1.2.0-win64.exe"));
+    EXPECT_EQ(Core::safeInstallerFileName(QStringLiteral("installer.zip"), QStringLiteral("1.2.0")),
+              QStringLiteral("VCC-1.2.0-win64.exe"));
+    EXPECT_EQ(Core::safeInstallerFileName(QString(), QStringLiteral("1.2.0")),
+              QStringLiteral("VCC-1.2.0-win64.exe"));
+    // 版本号本身也可能被塞进怪字符，拼出来的文件名只留数字点和字母。
+    EXPECT_EQ(Core::safeInstallerFileName(QString(), QStringLiteral("1.2.0-rc/1")),
+              QStringLiteral("VCC-1.2.0-rc-1-win64.exe"));
+}

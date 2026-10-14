@@ -1,6 +1,7 @@
 #include "core/Version.h"
 
 #include <algorithm>
+#include <QRegularExpression>
 #include <QStringList>
 
 #include "core/JsonUtil.h"
@@ -74,7 +75,59 @@ Result<Release> releaseFromJsonText(const QString &jsonText)
             ? QStringLiteral("release info has no tag_name")
             : message);
     }
+
+    // 安装包资产：优先名字以 VCC 开头的 .exe（我们自己的产物就是这个形状），其次挑
+    // 最大的 .exe。一个都没有就留空 —— 界面上"下载"那颗因此保持灰着，比让用户点下去
+    // 然后报"没东西可下"诚实。
+    const auto assets = parsed.value().find("assets");
+    if (assets != parsed.value().end() && assets->is_array()) {
+        struct Candidate {
+            QString name;
+            QString url;
+            qint64 size = -1;
+        };
+        Candidate ours;
+        Candidate any;
+        for (const Json &item : *assets) {
+            const QString name = JsonUtil::textOrEmpty(item, "name");
+            const QString url = JsonUtil::textOrEmpty(item, "browser_download_url");
+            if (url.isEmpty() || !name.toLower().endsWith(QLatin1String(".exe"))) {
+                continue;
+            }
+            Candidate candidate;
+            candidate.name = name;
+            candidate.url = url;
+            const auto sizeField = item.find("size");
+            candidate.size = (sizeField != item.end() && sizeField->is_number())
+                ? sizeField->get<qint64>()
+                : 0;
+            if (name.toLower().startsWith(QLatin1String("vcc-"))
+                && candidate.size >= ours.size) {
+                ours = candidate;
+            }
+            if (candidate.size > any.size) {
+                any = candidate;
+            }
+        }
+        const Candidate &chosen = ours.url.isEmpty() ? any : ours;
+        if (!chosen.url.isEmpty()) {
+            release.assetName = chosen.name;
+            release.assetUrl = chosen.url;
+            release.assetSize = chosen.size > 0 ? quint64(chosen.size) : 0;
+        }
+    }
     return Result<Release>::withValue(std::move(release));
+}
+
+QString safeInstallerFileName(const QString &assetName, const QString &version)
+{
+    static const QRegularExpression safe(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._-]{0,126}\\.exe$"));
+    if (safe.match(assetName).hasMatch() && !assetName.contains(QLatin1String(".."))) {
+        return assetName;
+    }
+    const QString digitsOnly = QString(version).replace(QRegularExpression(QStringLiteral("[^0-9A-Za-z.-]")),
+                                                         QStringLiteral("-"));
+    return QStringLiteral("VCC-%1-win64.exe").arg(digitsOnly.isEmpty() ? QStringLiteral("update") : digitsOnly);
 }
 
 } // namespace Core
