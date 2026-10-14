@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QProgressBar>
 #include <QApplication>
 #include <QDir>
 #include <QLabel>
@@ -205,4 +206,48 @@ TEST(AboutDialog, KeepsTheDownloadedFileNameInsideTheTargetDirectory)
     EXPECT_FALSE(escaped.contains(QStringLiteral(".."))) << escaped.toStdString();
     EXPECT_TRUE(escaped.endsWith(QStringLiteral(".exe"))) << escaped.toStdString();
     EXPECT_TRUE(escaped.startsWith(QStringLiteral("updates/"))) << escaped.toStdString();
+}
+
+/// 进度那行字：知道总长就给百分比，不知道就只报已收 —— 不编一个假的百分比。
+TEST(AboutDialog, ProgressTextOnlyInventsAPercentageWhenTheSizeIsKnown)
+{
+    const qint64 meg = 1024 * 1024;
+    EXPECT_EQ(Gui::AboutDialog::progressText(5 * meg, 20 * meg),
+              QStringLiteral("正在下载 5.0 MB / 20.0 MB（25%）"));
+    EXPECT_EQ(Gui::AboutDialog::progressText(0, 0), QStringLiteral("正在下载 0.0 MB…"));
+    EXPECT_FALSE(Gui::AboutDialog::progressText(3 * meg, 0).contains(QChar('%')));
+}
+
+/// 关于框自己要有身份：窗口图标 + 品牌行那枚 logo，不能只有两行字。
+TEST(AboutDialog, ShowsTheAppIconAndItsLogoRow)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+
+    Gui::AboutDialog dialog(*context);
+    EXPECT_FALSE(dialog.windowIcon().isNull()) << "标题栏上没有程序图标";
+    QLabel *logo = dialog.findChild<QLabel *>(QStringLiteral("AboutLogo"));
+    ASSERT_TRUE(logo != nullptr);
+    EXPECT_FALSE(logo->pixmap().isNull()) << "品牌行的 logo 没渲染出来";
+    EXPECT_EQ(logo->pixmap().width(), 44) << "品牌行的 logo 就是侧栏那一枚的尺寸";
+}
+
+/// 进度条平时不占位，只有下载中才出现（检查更新/关闭那两行不该被它撑开）。
+TEST(AboutDialog, ProgressBarStaysHiddenUntilADownloadStarts)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+
+    Gui::AboutDialog dialog(*context);
+    QProgressBar *bar = dialog.findChild<QProgressBar *>();
+    ASSERT_TRUE(bar != nullptr);
+    EXPECT_FALSE(bar->isVisible());
+    dialog.show();
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(bar->isVisible()) << "没在下载就该藏着";
+    dialog.hide();
 }

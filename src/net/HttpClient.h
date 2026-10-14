@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <functional>
 #include <QList>
 #include <QPair>
 #include <QString>
@@ -75,6 +76,14 @@ struct Request {
     QString userAgent;
     /// 最多跟随多少跳重定向（Rust 侧 reqwest 默认 10）。
     int maxRedirects = 10;
+
+    /// 非空 = 这一次当**下载**用：响应体边收边写进这个路径，Response.body 留空。
+    /// 几十 MB 的安装包不该整块进内存，而且只有流式写的时候"进度"才是真收了多少。
+    /// 任何失败（超时/取消/传输错/非 2xx）都会把写了一半的文件删掉，不留能双击的残包。
+    QString downloadToPath;
+    /// 下载进度：已收字节、总字节（对端没给 Content-Length 时总字节为 0）。
+    /// 只在调用 send() 的那条线程里被回调，别在里面直接碰 widget。
+    std::function<void(qint64, qint64)> downloadProgress;
 };
 
 struct Response {

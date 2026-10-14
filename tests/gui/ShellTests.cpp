@@ -447,8 +447,35 @@ TEST(GuiShell, bottomBarTestAllFollowsTheNodesPageIntensityKnob)
     EXPECT_GT(deep.timeoutMs, fast.timeoutMs);
 }
 
+/// 侧栏「关于」那一行必须带自己的图标：它借的是新画的第六枚 Info，
+/// 不是齿轮/插头（那两枚已经被"系统设置""外部接口"占了）。
+TEST(GuiShell, aboutRowCarriesItsOwnIcon)
+{
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+
+    Gui::MainWindow window(*context);
+    QPushButton *about = nullptr;
+    for (QPushButton *button : window.findChildren<QPushButton *>()) {
+        if (button->objectName() == QLatin1String("AboutNav")) {
+            about = button;
+        }
+    }
+    ASSERT_TRUE(about != nullptr);
+    EXPECT_EQ(about->text(), QStringLiteral("关于"));
+    EXPECT_FALSE(about->icon().isNull()) << "关于那行没挂上图标";
+    EXPECT_TRUE(about->property("navIconKind").isValid())
+        << "没记 navIconKind，换主题时它不会跟着重画";
+}
+
 int main(int argc, char *argv[])
 {
+    // vcc.qrc 编在静态库 vccApp 里，链接器不会因为没人引用它就把那个只有静态初始化器
+    // 的成员拉进来 —— 于是测试进程里 ":/app-icon.png" 是空的（真程序里 vcc.qrc 直接
+    // 编进 exe，所以从来没暴露过）。显式初始化一次，让测试真的验到图标这件事。
+    Q_INIT_RESOURCE(vcc);
     QApplication app(argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

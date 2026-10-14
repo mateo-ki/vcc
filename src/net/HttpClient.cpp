@@ -1,5 +1,6 @@
 #include "net/HttpClient.h"
 
+#include <QFile>
 #include <QEventLoop>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
@@ -249,12 +250,50 @@ Result<Response> send(const Request &request)
             idleTimer.start(request.bodyIdleTimeoutMs);
         }
     });
-    QObject::connect(reply, &QNetworkReply::downloadProgress, [&](qint64 bytesReceived, qint64) {
+    QObject::connect(reply, &QNetworkReply::downloadProgress, [&](qint64 bytesReceived,
+                                                                qint64 bytesTotal) {
         receivedBytes = bytesReceived;
         if (headersSeen && request.bodyIdleTimeoutMs > 0) {
             idleTimer.start(request.bodyIdleTimeoutMs);
         }
+        if (request.downloadProgress) {
+            // 总长直接取 Qt 算好的那个（重定向/分块编码下它比 Content-Length 可靠）。
+            request.downloadProgress(bytesReceived, bytesTotal);
+        }
     });
+
+    QFile sink;
+    QString sinkPath;
+    bool sinkCommitted = false;
+    if (!request.downloadToPath.isEmpty()) {
+        sinkPath = request.downloadToPath;
+        sink.setFileName(sinkPath);
+        if (!sink.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            reply->deleteLater();
+            return Result<Response>::withError(
+                QStringLiteral("打不开下载目标文件：%1").arg(sink.errorString()));
+        }
+        // 边收边写：不排空的话 Qt 会把整条响应攒在自己的缓冲里，23MB 就真进内存了。
+        QObject::connect(reply, &QNetworkReply::readyRead, [&]() {
+            sink.write(reply->readAll());
+        });
+    }
+    // 失败不留残包：超时/取消/传输错/非 2xx 的提前 return 都会经过这个守卫把文件删掉，
+    // 只有提交过（2xx 且写全）才留在盘上。
+    struct SinkCleanup {
+        QFile *file;
+        QString path;
+        const bool *committed;
+        ~SinkCleanup()
+        {
+            if (file->isOpen()) {
+                file->close();
+            }
+            if (!path.isEmpty() && !*committed) {
+                QFile::remove(path);
+            }
+        }
+    } sinkCleanup{ &sink, sinkPath, &sinkCommitted };
 
     QEventLoop loop;
     QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
@@ -298,13 +337,19 @@ Result<Response> send(const Request &request)
     Response response;
     response.finalUrl = reply->url().toString();
     response.headers = collectHeaders(reply);
-    response.body = reply->readAll();
+    if (request.downloadToPath.isEmpty()) {
+        response.body = reply->readAll();
+    } else {
+        sink.write(reply->readAll());
+    }
     const QVariant statusVariant = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
     response.status = statusVariant.toInt();
     const QString transport = transportError(reply, timedOut);
     const QByteArray reason = reply->attribute(QNetworkRequest::HttpReasonPhraseAttribute)
                                   .toByteArray();
     reply->deleteLater();
+
+    sinkCommitted = response.status >= 200 && response.status < 300;
 
     if (transport.isEmpty() || response.status > 0) {
         // 4xx/5xx 是响应，不是传输失败：状态码交给调用方判断。

@@ -7,8 +7,12 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
+#include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -31,7 +35,7 @@ QString field(const QString &name, const QString &value)
     return QStringLiteral("%1：%2").arg(name, value);
 }
 
-QString megabytes(quint64 bytes)
+QString megabytes(qint64 bytes)
 {
     return QStringLiteral("%1 MB").arg(double(bytes) / (1024.0 * 1024.0), 0, 'f', 1);
 }
@@ -82,25 +86,53 @@ QString AboutDialog::downloadTarget(const QString &directory, const QString &ass
     return QDir(directory).filePath(Core::safeInstallerFileName(assetName, version));
 }
 
+QString AboutDialog::progressText(qint64 received, qint64 total)
+{
+    if (total > 0) {
+        const int percent = int(received * 100 / total);
+        return QStringLiteral("正在下载 %1 / %2（%3%）")
+            .arg(megabytes(received), megabytes(total))
+            .arg(percent);
+    }
+    // 对端没给长度（分块传输）：只报已收，不编一个百分比。
+    return QStringLiteral("正在下载 %1…").arg(megabytes(received));
+}
+
 AboutDialog::AboutDialog(App::AppContext &context, QWidget *parent)
     : QDialog(parent), context_(context)
 {
     setWindowTitle(QStringLiteral("关于 VCC"));
+    setWindowIcon(QIcon(QStringLiteral(":/app-icon.png")));
     setModal(false);
-    resize(520, 330);
+    resize(520, 340);
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(20, 18, 20, 16);
     root->setSpacing(10);
 
+    // 品牌行：图标 + 名字/副标题，和侧栏顶部那一行同一枚图。
+    auto *head = new QHBoxLayout();
+    head->setSpacing(10);
+    constexpr int kLogoSize = 44;
+    auto *logo = new QLabel(this);
+    logo->setObjectName(QStringLiteral("AboutLogo"));
+    logo->setFixedSize(kLogoSize, kLogoSize);
+    logo->setScaledContents(true);
+    logo->setPixmap(QPixmap(QStringLiteral(":/app-icon.png")).scaled(
+        kLogoSize, kLogoSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    head->addWidget(logo);
+    auto *headText = new QVBoxLayout();
+    headText->setSpacing(1);
     auto *title = new QLabel(QStringLiteral("VCC"), this);
     title->setObjectName(QStringLiteral("Title"));
     title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: 700;"));
-    root->addWidget(title);
-
     auto *subtitle = new QLabel(UiText::brandSubtitle(), this);
     subtitle->setObjectName(QStringLiteral("Subtitle"));
-    root->addWidget(subtitle);
+    headText->addWidget(title);
+    headText->addWidget(subtitle);
+    head->addLayout(headText);
+    head->addStretch();
+    root->addLayout(head);
 
     auto *lines = new QVBoxLayout();
     lines->setSpacing(2);
@@ -114,31 +146,44 @@ AboutDialog::AboutDialog(App::AppContext &context, QWidget *parent)
         lines->addWidget(label);
     }
     root->addLayout(lines);
-    root->addSpacing(6);
+    root->addSpacing(4);
 
     statusLabel_ = new QLabel(QStringLiteral("还没检查过更新"), this);
     statusLabel_->setObjectName(QStringLiteral("Body"));
     statusLabel_->setWordWrap(true);
     root->addWidget(statusLabel_);
 
+    // 进度条平时不占位：只在下载那几秒出现，用真实收到的字节数驱动。
+    progressBar_ = new QProgressBar(this);
+    progressBar_->setRange(0, 100);
+    progressBar_->setValue(0);
+    progressBar_->setTextVisible(false);
+    progressBar_->setVisible(false);
+    root->addWidget(progressBar_);
+
+    // 布局：次要动作靠左、主操作靠右（Windows 那一套），关闭永远在最右。
+    // 之前五颗按钮全挤在左边、"关闭"孤零零吊在右头，看着就是歪的。
     auto *actions = new QHBoxLayout();
     actions->setSpacing(8);
-    checkButton_ = new QPushButton(QStringLiteral("检查更新"), this);
-    downloadButton_ = new QPushButton(QStringLiteral("下载新版本"), this);
     openPageButton_ = new QPushButton(QStringLiteral("打开发布页"), this);
     openFolderButton_ = new QPushButton(QStringLiteral("打开所在文件夹"), this);
+    checkButton_ = new QPushButton(QStringLiteral("检查更新"), this);
+    downloadButton_ = new QPushButton(QStringLiteral("下载新版本"), this);
     auto *closeButton = new QPushButton(QStringLiteral("关闭"), this);
     downloadButton_->setEnabled(false);
     openPageButton_->setEnabled(false);
     openFolderButton_->setEnabled(false);
-    actions->addWidget(checkButton_);
-    actions->addWidget(downloadButton_);
     actions->addWidget(openPageButton_);
     actions->addWidget(openFolderButton_);
     actions->addStretch();
+    actions->addWidget(checkButton_);
+    actions->addWidget(downloadButton_);
     actions->addWidget(closeButton);
     root->addLayout(actions);
 
+    progressTimer_ = new QTimer(this);
+    progressTimer_->setInterval(100);
+    connect(progressTimer_, &QTimer::timeout, this, [this]() { pollTransfer(); });
     connect(checkButton_, &QPushButton::clicked, this, [this]() { checkForUpdates(); });
     connect(downloadButton_, &QPushButton::clicked, this, [this]() { startDownload(); });
     connect(openPageButton_, &QPushButton::clicked, this, [this]() {
@@ -157,6 +202,22 @@ QString AboutDialog::subscriptionProxy() const
     return status.localProxyActive() && status.mixedPort > 0
         ? QStringLiteral("http://127.0.0.1:%1").arg(status.mixedPort)
         : QString();
+}
+
+void AboutDialog::pollTransfer()
+{
+    if (!transfer_) {
+        return;
+    }
+    const qint64 received = transfer_->received.load();
+    const qint64 total = transfer_->total.load();
+    if (total > 0) {
+        progressBar_->setRange(0, 100);
+        progressBar_->setValue(int(received * 100 / total));
+    } else {
+        progressBar_->setRange(0, 0);   // 长度未知：走马灯，不假装知道百分比
+    }
+    statusLabel_->setText(progressText(received, total));
 }
 
 void AboutDialog::showUpdateResult(const QString &text, const Core::Release &release)
@@ -251,18 +312,23 @@ void AboutDialog::startDownload()
 
     downloading_ = true;
     downloadButton_->setEnabled(false);
-    statusLabel_->setText(release_.assetSize > 0
-        ? QStringLiteral("正在下载 %1（约 %2）…").arg(fileName, megabytes(release_.assetSize))
-        : QStringLiteral("正在下载 %1…").arg(fileName));
+    checkButton_->setEnabled(false);
+    transfer_ = std::make_shared<Transfer>();
+    transfer_->total.store(qint64(release_.assetSize));
+    progressBar_->setRange(0, 0);
+    progressBar_->setValue(0);
+    progressBar_->setVisible(true);
+    statusLabel_->setText(progressText(0, qint64(release_.assetSize)));
+    progressTimer_->start();
 
     const QString proxyUrl = subscriptionProxy();
     const QString assetUrl = release_.assetUrl;
-    const quint64 expected = release_.assetSize;
+    const qint64 expected = qint64(release_.assetSize);
     auto outcome = std::make_shared<Result<QString>>(
         Result<QString>::withError(QStringLiteral("not run")));
 
     context_.runAsync(
-        [assetUrl, target, directory, proxyUrl, expected, outcome]() {
+        [assetUrl, target, directory, proxyUrl, expected, outcome, transfer = transfer_]() {
             QDir().mkpath(directory);
 
             Net::Request request;
@@ -271,8 +337,16 @@ void AboutDialog::startDownload()
             request.userAgent = QStringLiteral("vcc updater");
             request.connectTimeoutMs = 10000;
             // 安装包是几十 MB，别拿接口查询那 15s 的预算去卡它。
-            request.timeoutMs = 300000;
+            request.timeoutMs = 600000;
             request.proxyUrl = proxyUrl;
+            // 边收边写进文件：不把 23MB 整块读进内存，进度也就有真数可报。
+            request.downloadToPath = target;
+            request.downloadProgress = [transfer](qint64 received, qint64 total) {
+                transfer->received.store(received);
+                if (total > 0) {
+                    transfer->total.store(total);
+                }
+            };
 
             const Result<Net::Response> sent = Net::send(request);
             if (sent.isErr()) {
@@ -284,33 +358,27 @@ void AboutDialog::startDownload()
                     QStringLiteral("HTTP %1").arg(sent.value().status));
                 return;
             }
-            const QByteArray body = sent.value().body;
-            if (expected > 0 && quint64(body.size()) != expected) {
-                // GitHub 的重定向或半截响应都可能给短包，落盘前先对一眼长度。
-                *outcome = Result<QString>::withError(QStringLiteral("长度不符"));
+            const qint64 onDisk = QFileInfo(target).size();
+            if (expected > 0 && onDisk != expected) {
+                // 落盘字节数和发布元数据对不上就当失败：残包由 net 层删掉。
+                *outcome = Result<QString>::withError(
+                    QStringLiteral("落盘 %1，应为 %2").arg(onDisk).arg(expected));
                 return;
             }
-            QFile file(target);
-            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                *outcome = Result<QString>::withError(file.errorString());
-                return;
-            }
-            if (file.write(body) != body.size()) {
-                file.close();
-                QFile::remove(target);
-                *outcome = Result<QString>::withError(QStringLiteral("写入不完整"));
-                return;
-            }
-            file.close();
             *outcome = Result<QString>::withValue(target);
         },
         [this, outcome]() {
             downloading_ = false;
+            progressTimer_->stop();
+            progressBar_->setVisible(false);
+            checkButton_->setEnabled(true);
             if (outcome->isErr()) {
-                downloadButton_->setEnabled(false);
-                statusLabel_->setText(QStringLiteral("下载失败：%1").arg(outcome->error()));
+                downloadButton_->setEnabled(true);
+                statusLabel_->setText(QStringLiteral("下载失败：%1，可以再点一次").arg(outcome->error()));
                 return;
             }
+            progressBar_->setRange(0, 100);
+            progressBar_->setValue(100);
             savedPath_ = outcome->value();
             openFolderButton_->setEnabled(true);
             // 到此为止：装不装由人自己点这个文件，程序不替他起安装器。
