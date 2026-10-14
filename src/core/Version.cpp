@@ -84,6 +84,7 @@ Result<Release> releaseFromJsonText(const QString &jsonText)
         struct Candidate {
             QString name;
             QString url;
+            QString digest;
             qint64 size = -1;
         };
         Candidate ours;
@@ -97,6 +98,7 @@ Result<Release> releaseFromJsonText(const QString &jsonText)
             Candidate candidate;
             candidate.name = name;
             candidate.url = url;
+            candidate.digest = JsonUtil::textOrEmpty(item, "digest");
             const auto sizeField = item.find("size");
             candidate.size = (sizeField != item.end() && sizeField->is_number())
                 ? sizeField->get<qint64>()
@@ -113,6 +115,7 @@ Result<Release> releaseFromJsonText(const QString &jsonText)
         if (!chosen.url.isEmpty()) {
             release.assetName = chosen.name;
             release.assetUrl = chosen.url;
+            release.assetDigest = chosen.digest;
             release.assetSize = chosen.size > 0 ? quint64(chosen.size) : 0;
         }
     }

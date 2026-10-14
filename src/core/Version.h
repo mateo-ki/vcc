@@ -27,6 +27,9 @@ struct Release {
     QString assetName;
     QString assetUrl;
     quint64 assetSize = 0;
+    /// GitHub 给资产的校验值，形如 `sha256:<hex>`；老 release 可能没有。
+    /// 走镜像站时它是唯一的信任锚点（digest 本身只从 api.github.com 取，不经镜像）。
+    QString assetDigest;
 };
 
 Result<Release> releaseFromJsonText(const QString &jsonText);

@@ -5,7 +5,10 @@
 #include <atomic>
 #include <memory>
 
+#include <QList>
+
 #include "core/Version.h"
+#include "kernel/KernelSource.h"
 #include "gui/Page.h"
 
 class QLabel;
@@ -46,6 +49,20 @@ public:
     /// 实测 0 字节 / 20s 就断，而"检查更新"多半是在内核没跑的时候点的。
     static QString pickProxyUrl(const QString &kernelMixed, const QString &systemProxy);
 
+    /// 一次更新能走的三条通道，顺序就是弹框里的顺序：镜像站 / 本地代理 / 直接连。
+    /// 没有可用本地代理时，"本地代理"那一行不出现（列一条点不动的路等于骗人）。
+    static QList<Kernel::Source> downloadChannels(bool proxyAvailable);
+    /// 把一条通道翻成"下哪个 URL、要不要过代理"。纯函数，测试钉它。
+    struct DownloadPlan {
+        QString url;
+        QString proxyUrl;
+    };
+    static DownloadPlan planForDownload(Kernel::Source channel, const QString &assetUrl,
+                                        const QString &kernelMixed, const QString &systemProxy);
+    /// 校验值来自 GitHub（api.github.com），比对的是落盘文件的 sha256。
+    /// 没有校验值时镜像那条路直接拒绝，不"先下下来再说"。
+    static QString digestHex(const QString &assetDigest);
+
     /// 把检查结果写进界面：只有"确实有新版、且这条发布真挂了安装包"才点亮下载。
     void showUpdateResult(const QString &text, const Core::Release &release);
 
@@ -73,6 +90,7 @@ private:
     std::shared_ptr<Transfer> transfer_;
     Core::Release release_;
     QString savedPath_;
+    Kernel::Source lastChannel_ = Kernel::Source::GhProxy;
     bool checking_ = false;
     bool downloading_ = false;
 };

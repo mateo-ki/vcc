@@ -14,6 +14,7 @@
 #include "core/Result.h"
 #include "core/Version.h"
 #include "gui/AboutPage.h"
+#include "kernel/KernelSource.h"
 
 namespace {
 
@@ -141,11 +142,14 @@ TEST(AboutPage, LaysOutEveryRowWhenShown)
     ASSERT_TRUE(context != nullptr);
 
     Gui::AboutPage dialog(*context);
+    // 它是一页：真实尺寸来自内容栈（1330x800 减掉侧栏），不是自己 resize 出来的，
+    // 所以这里按一页该有的尺寸量，而不是拿对话框的默认大小当基线。
+    dialog.resize(1000, 700);
     dialog.show();
     QCoreApplication::processEvents();
 
-    EXPECT_GE(dialog.width(), 380) << dialog.size().width();
-    EXPECT_GE(dialog.height(), 220) << dialog.size().height();
+    EXPECT_EQ(dialog.width(), 1000);
+    EXPECT_EQ(dialog.height(), 700);
     int visibleLabels = 0;
     for (QLabel *label : dialog.findChildren<QLabel *>()) {
         if (label->isVisible() && !label->text().isEmpty()) {
@@ -264,4 +268,56 @@ TEST(AboutPage, FallsBackToTheSystemProxyWhenNoKernelIsRunning)
     EXPECT_EQ(Gui::AboutPage::pickProxyUrl(QString(), QStringLiteral("http://127.0.0.1:9980")),
               QStringLiteral("http://127.0.0.1:9980"));
     EXPECT_TRUE(Gui::AboutPage::pickProxyUrl(QString(), QString()).isEmpty());
+}
+
+/// 三条通道：镜像 / 本地代理 / 直连。没有可用代理时那一行不该出现。
+TEST(AboutPage, ListsThreeChannelsAndHidesProxyWhenThereIsNone)
+{
+    const QList<Kernel::Source> withProxy = Gui::AboutPage::downloadChannels(true);
+    ASSERT_EQ(withProxy.size(), 3);
+    EXPECT_EQ(withProxy.at(0), Kernel::Source::GhProxy);
+    EXPECT_EQ(withProxy.at(1), Kernel::Source::Proxy);
+    EXPECT_EQ(withProxy.at(2), Kernel::Source::Official);
+
+    const QList<Kernel::Source> withoutProxy = Gui::AboutPage::downloadChannels(false);
+    ASSERT_EQ(withoutProxy.size(), 2);
+    EXPECT_FALSE(withoutProxy.contains(Kernel::Source::Proxy))
+        << "列一条点不动的通道等于骗人";
+}
+
+/// 每条通道翻成"下哪个 URL、走不走代理"。
+TEST(AboutPage, PlansEachChannelDifferently)
+{
+    const QString asset = QStringLiteral("https://github.com/mateo-ki/vcc/releases/download/v9/VCC-9.exe");
+    const QString kernel = QStringLiteral("http://127.0.0.1:10808");
+    const QString system = QStringLiteral("http://127.0.0.1:9980");
+
+    const Gui::AboutPage::DownloadPlan mirror
+        = Gui::AboutPage::planForDownload(Kernel::Source::GhProxy, asset, kernel, system);
+    EXPECT_TRUE(mirror.url.startsWith(QStringLiteral("https://gh-proxy.com/"))) << mirror.url.toStdString();
+    EXPECT_TRUE(mirror.url.endsWith(asset)) << mirror.url.toStdString();
+    EXPECT_TRUE(mirror.proxyUrl.isEmpty()) << "镜像站是公网地址，不该再套一层自己的代理";
+
+    const Gui::AboutPage::DownloadPlan proxy
+        = Gui::AboutPage::planForDownload(Kernel::Source::Proxy, asset, kernel, system);
+    EXPECT_EQ(proxy.url, asset);
+    EXPECT_EQ(proxy.proxyUrl, kernel) << "自己的内核 mixed 优先";
+
+    const Gui::AboutPage::DownloadPlan proxyWithoutKernel
+        = Gui::AboutPage::planForDownload(Kernel::Source::Proxy, asset, QString(), system);
+    EXPECT_EQ(proxyWithoutKernel.proxyUrl, system);
+
+    const Gui::AboutPage::DownloadPlan direct
+        = Gui::AboutPage::planForDownload(Kernel::Source::Official, asset, kernel, system);
+    EXPECT_EQ(direct.url, asset);
+    EXPECT_TRUE(direct.proxyUrl.isEmpty()) << "选了直连就不能偷偷走代理";
+}
+
+/// 校验值只认 `sha256:<hex>` 这一种形状，比对用小写十六进制。
+TEST(AboutPage, ReadsOnlyASha256Digest)
+{
+    EXPECT_EQ(Gui::AboutPage::digestHex(QStringLiteral("sha256:5D585EB8")),
+              QStringLiteral("5d585eb8"));
+    EXPECT_TRUE(Gui::AboutPage::digestHex(QStringLiteral("md5:abcdef")).isEmpty());
+    EXPECT_TRUE(Gui::AboutPage::digestHex(QString()).isEmpty());
 }

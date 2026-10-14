@@ -1,6 +1,8 @@
 #include "gui/AboutPage.h"
 
 #include <QByteArray>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
@@ -9,6 +11,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QListWidget>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
@@ -17,9 +20,12 @@
 #include <QVBoxLayout>
 
 #include <memory>
+#include <optional>
 
 #include "app/AppContext.h"
+#include "core/Crypto.h"
 #include "core/Version.h"
+#include "kernel/KernelSource.h"
 #include "gui/UiText.h"
 #include "net/HttpClient.h"
 #include "proxy/ProxyManager.h"
@@ -191,6 +197,51 @@ AboutPage::AboutPage(App::AppContext &context, QWidget *parent)
     });
 }
 
+QList<Kernel::Source> AboutPage::downloadChannels(bool proxyAvailable)
+{
+    QList<Kernel::Source> channels;
+    channels << Kernel::Source::GhProxy;
+    if (proxyAvailable) {
+        channels << Kernel::Source::Proxy;
+    }
+    channels << Kernel::Source::Official;
+    return channels;
+}
+
+AboutPage::DownloadPlan AboutPage::planForDownload(Kernel::Source channel, const QString &assetUrl,
+                                                   const QString &kernelMixed,
+                                                   const QString &systemProxy)
+{
+    DownloadPlan plan;
+    switch (channel) {
+    case Kernel::Source::GhProxy: {
+        // 镜像前缀与内核下载共用同一张表（Kernel::assetMirrorPrefixes），顺序即优先级。
+        const auto &prefixes = Kernel::assetMirrorPrefixes();
+        plan.url = prefixes.isEmpty() ? assetUrl : prefixes.first().second + assetUrl;
+        // 镜像站本身是公网地址，不需要再套一层代理。
+        plan.proxyUrl = QString();
+        return plan;
+    }
+    case Kernel::Source::Proxy:
+        plan.url = assetUrl;
+        plan.proxyUrl = pickProxyUrl(kernelMixed, systemProxy);
+        return plan;
+    default:
+        plan.url = assetUrl;
+        plan.proxyUrl = QString();   // 明确"就是直连"，失败也就直报
+        return plan;
+    }
+}
+
+QString AboutPage::digestHex(const QString &assetDigest)
+{
+    const QString prefix = QStringLiteral("sha256:");
+    if (!assetDigest.startsWith(prefix)) {
+        return QString();
+    }
+    return assetDigest.mid(prefix.size()).toLower();
+}
+
 QString AboutPage::pickProxyUrl(const QString &kernelMixed, const QString &systemProxy)
 {
     if (!kernelMixed.isEmpty()) {
@@ -307,6 +358,64 @@ void AboutPage::checkForUpdates()
         this);
 }
 
+namespace {
+
+/// 三条通道列成一个列表让人挑。一次只走一条：并发抢跑会把三条线的成败混成一条，
+/// 报"下载失败"时没人知道该怪谁（内核下载那边删掉 race 模式就是为这个）。
+std::optional<Kernel::Source> chooseChannel(QWidget *parent, const QList<Kernel::Source> &channels,
+                                            Kernel::Source current)
+{
+    QDialog box(parent);
+    box.setWindowTitle(QStringLiteral("选择下载方式"));
+    auto *layout = new QVBoxLayout(&box);
+    layout->setContentsMargins(16, 14, 16, 12);
+    layout->setSpacing(10);
+
+    auto *hint = new QLabel(QStringLiteral("下载完成后会用 GitHub 公布的 sha256 校验，对不上就删掉。"),
+                            &box);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    auto *list = new QListWidget(&box);
+    for (Kernel::Source channel : channels) {
+        for (const Kernel::SourceOption &option : Kernel::sourceOptions()) {
+            if (option.source != channel) {
+                continue;
+            }
+            auto *item = new QListWidgetItem(option.label, list);
+            item->setToolTip(option.hint);
+            item->setData(Qt::UserRole, int(channel));
+            if (channel == current) {
+                list->setCurrentItem(item);
+            }
+        }
+    }
+    if (list->currentItem() == nullptr && list->count() > 0) {
+        list->setCurrentRow(0);
+    }
+    list->setMinimumHeight(132);
+    layout->addWidget(list, 1);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &box);
+    buttons->setStyleSheet(QStringLiteral("font-size: 13px;"));
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("开始下载"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &box, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &box, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (box.exec() != QDialog::Accepted) {
+        return std::nullopt;
+    }
+    QListWidgetItem *item = list->currentItem();
+    if (item == nullptr) {
+        return std::nullopt;
+    }
+    return static_cast<Kernel::Source>(item->data(Qt::UserRole).toInt());
+}
+
+} // namespace
+
 void AboutPage::startDownload()
 {
     if (downloading_ || release_.assetUrl.isEmpty()) {
@@ -324,6 +433,28 @@ void AboutPage::startDownload()
         return;
     }
 
+    const QString kernelMixed = [&] {
+        const auto status = context_.proxy().status();
+        return status.localProxyActive() && status.mixedPort > 0
+            ? QStringLiteral("http://127.0.0.1:%1").arg(status.mixedPort)
+            : QString();
+    }();
+    const QString systemProxy = SysProxy::currentSystemProxyUrl();
+    const bool proxyAvailable = !kernelMixed.isEmpty() || !systemProxy.isEmpty();
+    const auto chosen = chooseChannel(this, downloadChannels(proxyAvailable), lastChannel_);
+    if (!chosen.has_value()) {
+        return;   // 取消就是取消，不许偷偷用默认通道开跑
+    }
+    lastChannel_ = *chosen;
+    const DownloadPlan plan = planForDownload(*chosen, release_.assetUrl, kernelMixed, systemProxy);
+    const QString expectedSha = digestHex(release_.assetDigest);
+    if (plan.url != release_.assetUrl && expectedSha.isEmpty()) {
+        // 镜像站只是把字节搬过来，它同时也有能力换掉字节。没有 GitHub 给的校验值，
+        // 就没有任何东西能证明落盘的那个 exe 是 GitHub 上那个。
+        statusLabel_->setText(QStringLiteral("这条发布没有公布 sha256，镜像下载已拒绝，请选直连或本地代理。"));
+        return;
+    }
+
     downloading_ = true;
     downloadButton_->setEnabled(false);
     checkButton_->setEnabled(false);
@@ -335,14 +466,15 @@ void AboutPage::startDownload()
     statusLabel_->setText(progressText(0, qint64(release_.assetSize)));
     progressTimer_->start();
 
-    const QString proxyUrl = updateProxyUrl();
-    const QString assetUrl = release_.assetUrl;
+    const QString assetUrl = plan.url;
+    const QString proxyUrl = plan.proxyUrl;
     const qint64 expected = qint64(release_.assetSize);
     auto outcome = std::make_shared<Result<QString>>(
         Result<QString>::withError(QStringLiteral("not run")));
 
     context_.runAsync(
-        [assetUrl, target, directory, proxyUrl, expected, outcome, transfer = transfer_]() {
+        [assetUrl, target, directory, proxyUrl, expected, expectedSha, outcome,
+         transfer = transfer_]() {
             QDir().mkpath(directory);
 
             Net::Request request;
@@ -371,6 +503,20 @@ void AboutPage::startDownload()
                 *outcome = Result<QString>::withError(
                     QStringLiteral("HTTP %1").arg(sent.value().status));
                 return;
+            }
+            // 先校验再谈成功：字节数对但内容被换过（镜像/中间人）也必须当失败。
+            if (!expectedSha.isEmpty()) {
+                const Result<QString> hash = Crypto::sha256HexOfFile(target);
+                if (hash.isErr()) {
+                    *outcome = Result<QString>::withError(hash.error());
+                    QFile::remove(target);
+                    return;
+                }
+                if (hash.value().toLower() != expectedSha) {
+                    *outcome = Result<QString>::withError(QStringLiteral("sha256 不匹配"));
+                    QFile::remove(target);
+                    return;
+                }
             }
             const qint64 onDisk = QFileInfo(target).size();
             if (expected > 0 && onDisk != expected) {

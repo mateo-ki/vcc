@@ -72,6 +72,16 @@ TEST(VersionReleaseJson, PrefersOurOwnInstallerAsset)
     EXPECT_EQ(parsed.value().assetSize, quint64(4000));
 }
 
+TEST(VersionReleaseJson, CarriesTheAssetDigestSoMirrorsCanBeVerified)
+{
+    const QString body = QStringLiteral(R"({"tag_name":"v2.0.0","assets":[
+        {"name":"VCC-2.0.0-win64.exe","browser_download_url":"https://x/a.exe","size":10,
+         "digest":"sha256:AbCd"}]})");
+    const Result<Core::Release> parsed = Core::releaseFromJsonText(body);
+    ASSERT_TRUE(parsed.isOk()) << parsed.error().toStdString();
+    EXPECT_EQ(parsed.value().assetDigest, QStringLiteral("sha256:AbCd"));
+}
+
 TEST(VersionReleaseJson, FallsBackToTheBiggestExeWhenNothingLooksOurs)
 {
     const QString body = QStringLiteral(R"({"tag_name":"v2.0.0","assets":[
