@@ -259,6 +259,9 @@ QWidget *MainWindow::buildSidebar()
     auto *aboutButton = new QPushButton(QStringLiteral("关于"), sidebar);
     aboutButton->setObjectName(QStringLiteral("AboutNav"));
     aboutButton->setCursor(Qt::PointingHandCursor);
+    // 图标用新一枚 Info（Rust 侧栏没有"关于"这一行）；换主题时 Theme::apply 会按
+    // navIconKind 属性重画它。
+    Gui::Icons::setNavIcon(aboutButton, Gui::Icons::Kind::Info);
     Gui::Theme::setWidgetCss(aboutButton,
         QStringLiteral("QPushButton { background: transparent; color: {sidebarMuted}; border: none;"
                        " text-align: left; padding: 7px 12px; }"

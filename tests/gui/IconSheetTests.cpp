@@ -22,7 +22,7 @@ namespace {
 
 using Gui::Icons::Kind;
 
-constexpr int kIconCount = 5;
+constexpr int kIconCount = 6;
 constexpr int kVariantCount = 3;
 
 QColor withAlpha(const QColor &color, int alpha)
@@ -172,6 +172,11 @@ void drawCandidate(QPainter *p, const QRectF &rect, Kind kind, int variant, cons
                    290 * 16);
         return;
     }
+    case Kind::Info:
+        // 第六枚是我们自己加的（Rust 的 icons.rs 没有"关于"这枚），只有一版，
+        // 所以三个格都画同一张：对照表在这里的作用是确认它和那一列一样重。
+        Gui::Icons::paint(p, rect, kind, ink);
+        return;
     }
 }
 
@@ -183,7 +188,7 @@ TEST(IconSheet, writesAComparisonPng)
     }
     const Gui::Theme::Palette pal = Gui::Theme::current();
     const char *titles[kIconCount] = {"1 Dashboard", "2 Lightning", "3 Subscription", "4 Gear",
-                                      "5 Plug"};
+                                      "5 Plug", "6 Info (ours, for About)"};
 
     const int cellW = 240, cellH = 116, headH = 40;
     QImage image(cellW * kVariantCount, headH + cellH * kIconCount + 26, QImage::Format_ARGB32);

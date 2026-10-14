@@ -13,7 +13,9 @@ namespace Gui::Icons {
 /// 对应 Rust gui/icons.rs 的 `Icon` 枚举。这里只移植侧栏导航真正会画的那五枚
 /// （Dashboard / Lightning / Subscription / Gear / Plug，见 sidebar.rs 的五个 nav_item）；
 /// 其余 25 枚等有用到再说，别把 900 行 painter 代码搬进来却一笔都不画。
-enum class Kind { Dashboard, Lightning, Subscription, Gear, Plug };
+/// Info 是**第六枚、Rust 没有**：侧栏「关于」那行需要一枚自己的符号，
+/// 借齿轮（系统设置）或插头（外部接口）都会让人点错页。
+enum class Kind { Dashboard, Lightning, Subscription, Gear, Plug, Info };
 
 /// Rust 的 `nav_item` 给的是 17.0；他连着两轮要『图标大一点』，现在放到 20
 /// （有意偏离，别当移植不准对回去）。

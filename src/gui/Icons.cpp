@@ -129,6 +129,26 @@ void paint(QPainter *painter, const QRectF &rect, Kind kind, const QColor &color
                          290 * 16);
         break;
     }
+    case Kind::Info: {
+        // 一圈 + 圈里的 "i"（一个点 + 一小段竖）。这一列的规矩是"一档笔画 + 圆头圆角"，
+        // 所以圈用同一支 pen（w = s*0.085），点做成实心小圆而不是细线，
+        // 免得 20px 下读成一粒噪点。
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(pen);
+        const qreal d = s * 0.80;
+        painter->drawEllipse(QRectF(c.x() - d / 2.0, c.y() - d / 2.0, d, d));
+
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(color);
+        const qreal dot = s * 0.11;
+        painter->drawEllipse(QRectF(c.x() - dot / 2.0, c.y() - s * 0.27, dot, dot));
+
+        QPen stem(color, w);
+        stem.setCapStyle(Qt::RoundCap);
+        painter->setPen(stem);
+        painter->drawLine(QPointF(c.x(), c.y() - s * 0.05), QPointF(c.x(), c.y() + s * 0.21));
+        break;
+    }
     }
 }
 
