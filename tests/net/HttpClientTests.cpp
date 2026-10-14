@@ -117,13 +117,17 @@ TEST(HttpClientTests, aPeerThatNeverAnswersHeadersFailsOnTheHeaderBudgetNotTheWh
 
     QElapsedTimer started;
     started.start();
-    const Result<Net::Response> result = Net::send(requestFor(server, 8000, 500, 500));
+    // 预算抬到 1500ms：500ms 那档在共享 runner 上会被事件循环饿到 —— v1.3.0 的 tag
+    // 作业实测 2618ms 才回（同一个提交的 main 作业却是 40/40 绿），差的就是那 2 秒
+    // 调度。这条要证的仍然是"按响应头预算放手，而不是等满整体 8s"，所以余量给到
+    // 5000ms（< 8000 的一半），阈值没有放松到能放过"根本没按分段超时放手"。
+    const Result<Net::Response> result = Net::send(requestFor(server, 8000, 1500, 1500));
     const qint64 elapsed = started.elapsed();
 
     ASSERT_TRUE(result.isErr());
     ASSERT_EQ(result.error(), QStringLiteral("响应头超时"));
-    ASSERT_GE(elapsed, 400) << elapsed;
-    ASSERT_LE(elapsed, 2500) << "没有按响应头预算放手: " << elapsed;
+    ASSERT_GE(elapsed, 1400) << elapsed;
+    ASSERT_LE(elapsed, 5000) << "没有按响应头预算放手: " << elapsed;
 }
 
 TEST(HttpClientTests, aBodyThatStopsMidwayIsReportedWithRustsIdleMessage)
