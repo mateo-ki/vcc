@@ -43,6 +43,11 @@ public:
     /// 进度条上那行字（纯函数：收了多少 / 一共多少，总长未知时只报已收）。
     static QString progressText(qint64 received, qint64 total);
 
+    /// 出口优先级：内核 mixed > 系统代理 > 直连。GitHub 的资产 CDN 在这台机器上直连
+    /// 实测 0 字节 / 20s 就断，而"检查更新"多半是在内核没跑的时候点的，只认自己的
+    /// mixed 端口就等于必然失败。
+    static QString pickProxyUrl(const QString &kernelMixed, const QString &systemProxy);
+
     /// 把检查结果写进界面：只有"确实有新版、且这条发布真挂了安装包"才点亮下载。
     void showUpdateResult(const QString &text, const Core::Release &release);
 
@@ -54,8 +59,10 @@ private:
 
     void checkForUpdates();
     void startDownload();
-    /// 内核在跑就顺着它出去，跟订阅拉取用同一个出口；没跑就直连。
-    QString subscriptionProxy() const;
+    /// 这条链路（检查 + 下载）该走哪个出口：自己的内核 mixed 端口优先，
+    /// 内核没跑就用 Windows 系统代理 —— 见 pickProxyUrl。
+    QString updateProxyUrl() const;
+
     /// 下载期间每 100ms 读一次 worker 写的计数：进度只有这一个来源，
     /// 不让 worker 直接跨线程碰控件，也不往事件队列里灌几千个 posted event。
     void pollTransfer();

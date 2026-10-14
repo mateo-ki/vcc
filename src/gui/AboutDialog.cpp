@@ -23,6 +23,7 @@
 #include "gui/UiText.h"
 #include "net/HttpClient.h"
 #include "proxy/ProxyManager.h"
+#include "sysproxy/SystemProxy.h"
 
 namespace Gui {
 
@@ -195,13 +196,25 @@ AboutDialog::AboutDialog(App::AppContext &context, QWidget *parent)
     connect(closeButton, &QPushButton::clicked, this, &QDialog::close);
 }
 
-QString AboutDialog::subscriptionProxy() const
+QString AboutDialog::pickProxyUrl(const QString &kernelMixed, const QString &systemProxy)
 {
-    // 内核在跑就顺着它出去，跟订阅拉取用同一个出口；没跑就直连。
+    if (!kernelMixed.isEmpty()) {
+        return kernelMixed;
+    }
+    if (!systemProxy.isEmpty()) {
+        return systemProxy;
+    }
+    return QString();   // 两条都没有才直连，让对端的失败原样报给用户
+}
+
+QString AboutDialog::updateProxyUrl() const
+{
     const auto status = context_.proxy().status();
-    return status.localProxyActive() && status.mixedPort > 0
+    const QString kernelMixed = status.localProxyActive() && status.mixedPort > 0
         ? QStringLiteral("http://127.0.0.1:%1").arg(status.mixedPort)
         : QString();
+    // 注册表查询是阻塞的，但这条链路本身就在 worker 线程上跑，且一次点击最多两次。
+    return pickProxyUrl(kernelMixed, SysProxy::currentSystemProxyUrl());
 }
 
 void AboutDialog::pollTransfer()
@@ -244,7 +257,7 @@ void AboutDialog::checkForUpdates()
     openPageButton_->setEnabled(false);
     statusLabel_->setText(QStringLiteral("正在检查更新…"));
 
-    const QString proxyUrl = subscriptionProxy();
+    const QString proxyUrl = updateProxyUrl();
     auto outcome = std::make_shared<Result<QString>>(
         Result<QString>::withError(QStringLiteral("not run")));
     auto release = std::make_shared<Core::Release>();
@@ -321,7 +334,7 @@ void AboutDialog::startDownload()
     statusLabel_->setText(progressText(0, qint64(release_.assetSize)));
     progressTimer_->start();
 
-    const QString proxyUrl = subscriptionProxy();
+    const QString proxyUrl = updateProxyUrl();
     const QString assetUrl = release_.assetUrl;
     const qint64 expected = qint64(release_.assetSize);
     auto outcome = std::make_shared<Result<QString>>(

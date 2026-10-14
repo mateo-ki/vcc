@@ -251,3 +251,14 @@ TEST(AboutDialog, ProgressBarStaysHiddenUntilADownloadStarts)
     EXPECT_FALSE(bar->isVisible()) << "没在下载就该藏着";
     dialog.hide();
 }
+
+/// 出口优先级：自己的内核 mixed 端口 > Windows 系统代理 > 直连。
+TEST(AboutDialog, FallsBackToTheSystemProxyWhenNoKernelIsRunning)
+{
+    EXPECT_EQ(Gui::AboutDialog::pickProxyUrl(QStringLiteral("http://127.0.0.1:10808"),
+                                             QStringLiteral("http://127.0.0.1:9980")),
+              QStringLiteral("http://127.0.0.1:10808"));
+    EXPECT_EQ(Gui::AboutDialog::pickProxyUrl(QString(), QStringLiteral("http://127.0.0.1:9980")),
+              QStringLiteral("http://127.0.0.1:9980"));
+    EXPECT_TRUE(Gui::AboutDialog::pickProxyUrl(QString(), QString()).isEmpty());
+}
