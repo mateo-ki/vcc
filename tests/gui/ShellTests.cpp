@@ -75,11 +75,12 @@ TEST(GuiShell, sidebarListsFiveTabsInRustOrder)
             items.push_back(button);
         }
     }
-    ASSERT_EQ(items.size(), 5);
-    // 顺序抄自 views/sidebar.rs：控制台、节点池、订阅源、系统设置、外部接口。
+    // Rust 侧栏那五枚顺序照抄 views/sidebar.rs，第六枚「关于」是我们自己多出来的一页。
+    ASSERT_EQ(items.size(), 6);
     const QStringList expected = {Gui::UiText::navConsole(),  Gui::UiText::navNodePool(),
                                   Gui::UiText::navSubscriptions(),
-                                  Gui::UiText::navSystemSettings(), Gui::UiText::navExternalApi()};
+                                  Gui::UiText::navSystemSettings(), Gui::UiText::navExternalApi(),
+                                  QStringLiteral("关于")};
     for (int index = 0; index < items.size(); ++index) {
         EXPECT_EQ(items.at(index)->text().toStdString(), expected.at(index).toStdString());
         EXPECT_EQ(items.at(index)->property("tab").toInt(), index);
@@ -327,13 +328,13 @@ TEST(GuiShell, sidebarNavItemsCarryRustsFiveIcons)
     QCoreApplication::processEvents();
 
     const QList<QPushButton *> items = window.findChildren<QPushButton *>(QStringLiteral("Nav"));
-    ASSERT_EQ(items.size(), 5);
+    ASSERT_EQ(items.size(), 6);   // Rust 的五枚 + 我们自己的一页「关于」
     const Gui::Theme::Palette first = Gui::Theme::current();
 
     QVector<quint64> masks;
     for (int index = 0; index < items.size(); ++index) {
         QPushButton *button = items.at(index);
-        // kind 的取值就是 Icons::Kind 的枚举序（Dashboard=0…Plug=4），顺序抄 Rust。
+        // kind 的取值就是 Icons::Kind 的枚举序（Dashboard=0…Plug=4 抄 Rust，Info=5 是我们的）。
         ASSERT_TRUE(button->property("navIconKind").canConvert<int>())
             << "第 " << index << " 条导航没有图标";
         ASSERT_EQ(button->property("navIconKind").toInt(), index);
@@ -447,9 +448,9 @@ TEST(GuiShell, bottomBarTestAllFollowsTheNodesPageIntensityKnob)
     EXPECT_GT(deep.timeoutMs, fast.timeoutMs);
 }
 
-/// 侧栏「关于」那一行必须带自己的图标：它借的是新画的第六枚 Info，
-/// 不是齿轮/插头（那两枚已经被"系统设置""外部接口"占了）。
-TEST(GuiShell, aboutRowCarriesItsOwnIcon)
+/// 「关于」是侧栏第六枚页签：图标必须是新画的 Info（不是齿轮/插头），
+/// 而且要点得动 —— 它切的是页面，不再是弹框。
+TEST(GuiShell, aboutIsTheSixthTabAndCarriesItsOwnIcon)
 {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());
@@ -458,16 +459,20 @@ TEST(GuiShell, aboutRowCarriesItsOwnIcon)
 
     Gui::MainWindow window(*context);
     QPushButton *about = nullptr;
-    for (QPushButton *button : window.findChildren<QPushButton *>()) {
-        if (button->objectName() == QLatin1String("AboutNav")) {
+    for (QPushButton *button : window.findChildren<QPushButton *>(QStringLiteral("Nav"))) {
+        if (button->property("tab").toInt() == int(Gui::Tab::About)) {
             about = button;
         }
     }
-    ASSERT_TRUE(about != nullptr);
+    ASSERT_TRUE(about != nullptr) << "侧栏没有「关于」这一枚页签";
     EXPECT_EQ(about->text(), QStringLiteral("关于"));
+    EXPECT_TRUE(about->isCheckable()) << "它是一页，该和其它页签一样可勾选";
     EXPECT_FALSE(about->icon().isNull()) << "关于那行没挂上图标";
-    EXPECT_TRUE(about->property("navIconKind").isValid())
-        << "没记 navIconKind，换主题时它不会跟着重画";
+    EXPECT_EQ(about->property("navIconKind").toInt(), int(Gui::Icons::Kind::Info));
+
+    window.selectTab(Gui::Tab::About);
+    EXPECT_EQ(window.currentTab(), Gui::Tab::About);
+    EXPECT_TRUE(about->isChecked());
 }
 
 int main(int argc, char *argv[])

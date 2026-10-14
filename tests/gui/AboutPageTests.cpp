@@ -13,7 +13,7 @@
 #include "app/AppContext.h"
 #include "core/Result.h"
 #include "core/Version.h"
-#include "gui/AboutDialog.h"
+#include "gui/AboutPage.h"
 
 namespace {
 
@@ -29,7 +29,7 @@ std::shared_ptr<App::AppContext> makeContext(const QString &directory)
     return created.value();
 }
 
-QString findButtonText(Gui::AboutDialog &dialog, const QString &text)
+QString findButtonText(Gui::AboutPage &dialog, const QString &text)
 {
     for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
         if (button->text() == text) {
@@ -39,7 +39,7 @@ QString findButtonText(Gui::AboutDialog &dialog, const QString &text)
     return QString();
 }
 
-bool hasLabelWith(Gui::AboutDialog &dialog, const QString &fragment)
+bool hasLabelWith(Gui::AboutPage &dialog, const QString &fragment)
 {
     for (QLabel *label : dialog.findChildren<QLabel *>()) {
         if (label->text().contains(fragment)) {
@@ -49,7 +49,7 @@ bool hasLabelWith(Gui::AboutDialog &dialog, const QString &fragment)
     return false;
 }
 
-QPushButton *buttonByLabel(Gui::AboutDialog &dialog, const QString &label)
+QPushButton *buttonByLabel(Gui::AboutPage &dialog, const QString &label)
 {
     for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
         if (button->text() == label) {
@@ -61,31 +61,32 @@ QPushButton *buttonByLabel(Gui::AboutDialog &dialog, const QString &label)
 
 } // namespace
 
-TEST(AboutDialog, ShowsTheBuiltInVersionAndTheRepository)
+TEST(AboutPage, ShowsTheBuiltInVersionAndTheRepository)
 {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());
     auto context = makeContext(directory.path());
     ASSERT_TRUE(context != nullptr);
 
-    Gui::AboutDialog dialog(*context);
-    EXPECT_EQ(dialog.windowTitle(), QStringLiteral("关于 VCC"));
+    Gui::AboutPage dialog(*context);
+    // 它是一页，不是对话框：没有标题栏可断言，页面自己有 objectName。
+    EXPECT_EQ(dialog.objectName(), QStringLiteral("AboutPage"));
     EXPECT_TRUE(hasLabelWith(dialog, Core::appVersion()))
         << "关于框里看不到当前版本，检查更新就没有对照";
-    EXPECT_TRUE(hasLabelWith(dialog, Gui::AboutDialog::repositoryUrl()));
+    EXPECT_TRUE(hasLabelWith(dialog, Gui::AboutPage::repositoryUrl()));
     EXPECT_TRUE(hasLabelWith(dialog, QStringLiteral("Apache-2.0")));
     EXPECT_FALSE(findButtonText(dialog, QStringLiteral("检查更新")).isEmpty());
     EXPECT_FALSE(findButtonText(dialog, QStringLiteral("打开发布页")).isEmpty());
 }
 
-TEST(AboutDialog, DownloadStaysDarkUntilThereIsSomethingToGrab)
+TEST(AboutPage, DownloadStaysDarkUntilThereIsSomethingToGrab)
 {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());
     auto context = makeContext(directory.path());
     ASSERT_TRUE(context != nullptr);
 
-    Gui::AboutDialog dialog(*context);
+    Gui::AboutPage dialog(*context);
     for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
         if (button->text() == QStringLiteral("打开发布页")) {
             EXPECT_FALSE(button->isEnabled()) << "还没检查过就给了一个指向未知的按钮";
@@ -105,41 +106,41 @@ TEST(AboutDialog, DownloadStaysDarkUntilThereIsSomethingToGrab)
     }
 }
 
-TEST(AboutDialog, StatusTextTellsTheThreeCasesApart)
+TEST(AboutPage, StatusTextTellsTheThreeCasesApart)
 {
-    EXPECT_EQ(Gui::AboutDialog::updateStatusText(QStringLiteral("v1.3.0"), QStringLiteral("1.2.0")),
+    EXPECT_EQ(Gui::AboutPage::updateStatusText(QStringLiteral("v1.3.0"), QStringLiteral("1.2.0")),
               QStringLiteral("发现新版本 1.3.0（当前 1.2.0）"));
-    EXPECT_EQ(Gui::AboutDialog::updateStatusText(QStringLiteral("v1.2.0"), QStringLiteral("1.2.0")),
+    EXPECT_EQ(Gui::AboutPage::updateStatusText(QStringLiteral("v1.2.0"), QStringLiteral("1.2.0")),
               QStringLiteral("已是最新版 1.2.0"));
     // 开发构建比发布版新：既不是"有更新"，也不能谎称"已是最新"。
-    EXPECT_EQ(Gui::AboutDialog::updateStatusText(QStringLiteral("v1.1.1"), QStringLiteral("1.2.0")),
+    EXPECT_EQ(Gui::AboutPage::updateStatusText(QStringLiteral("v1.1.1"), QStringLiteral("1.2.0")),
               QStringLiteral("当前 1.2.0 比最新发布版 1.1.1 更新"));
     // 一个发布都还没建时，latest 接口回的就是 404：这不是"检查失败"。
-    EXPECT_EQ(Gui::AboutDialog::failureStatusText(QStringLiteral("HTTP 404")),
+    EXPECT_EQ(Gui::AboutPage::failureStatusText(QStringLiteral("HTTP 404")),
               QStringLiteral("还没有已发布的版本"));
-    EXPECT_EQ(Gui::AboutDialog::failureStatusText(QStringLiteral("HTTP 502")),
+    EXPECT_EQ(Gui::AboutPage::failureStatusText(QStringLiteral("HTTP 502")),
               QStringLiteral("检查失败：HTTP 502"));
-    EXPECT_EQ(Gui::AboutDialog::failureStatusText(QString()), QStringLiteral("检查失败：未知原因"));
+    EXPECT_EQ(Gui::AboutPage::failureStatusText(QString()), QStringLiteral("检查失败：未知原因"));
 }
 
-TEST(AboutDialog, PointsAtTheRepoAndItsReleasesPage)
+TEST(AboutPage, PointsAtTheRepoAndItsReleasesPage)
 {
-    EXPECT_EQ(Gui::AboutDialog::repositoryUrl(), QStringLiteral("https://github.com/mateo-ki/vcc"));
-    EXPECT_EQ(Gui::AboutDialog::releasesUrl(),
+    EXPECT_EQ(Gui::AboutPage::repositoryUrl(), QStringLiteral("https://github.com/mateo-ki/vcc"));
+    EXPECT_EQ(Gui::AboutPage::releasesUrl(),
               QStringLiteral("https://github.com/mateo-ki/vcc/releases"));
-    EXPECT_EQ(Gui::AboutDialog::latestReleaseApiUrl(),
+    EXPECT_EQ(Gui::AboutPage::latestReleaseApiUrl(),
               QStringLiteral("https://api.github.com/repos/mateo-ki/vcc/releases/latest"));
 }
 
 /// 离屏摆一次：四行信息 + 一行状态 + 三颗按钮都得在场、都得看得见，尺寸不许挤成一团。
-TEST(AboutDialog, LaysOutEveryRowWhenShown)
+TEST(AboutPage, LaysOutEveryRowWhenShown)
 {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());
     auto context = makeContext(directory.path());
     ASSERT_TRUE(context != nullptr);
 
-    Gui::AboutDialog dialog(*context);
+    Gui::AboutPage dialog(*context);
     dialog.show();
     QCoreApplication::processEvents();
 
@@ -158,19 +159,22 @@ TEST(AboutDialog, LaysOutEveryRowWhenShown)
             ++visibleButtons;
         }
     }
-    EXPECT_GE(visibleButtons, 2) << "检查更新与关闭至少得是能点的";
+    // 页上没有"关闭"这颗了（它不是弹框）：开页时只有「检查更新」该是能点的，
+    // 下载/打开发布页/打开所在文件夹都要等检查结果出来。
+    EXPECT_EQ(visibleButtons, 1) << "没检查过就该只有一颗能点：检查更新";
+    EXPECT_GE(dialog.findChildren<QPushButton *>().size(), 4) << "四颗动作按钮都得在场";
     dialog.hide();
 }
 
 /// 下载那颗只在"确有新版、且这条发布真挂了安装包"时亮；缺一个条件都不该亮。
-TEST(AboutDialog, EnablesDownloadOnlyWhenANewerReleaseCarriesAnInstaller)
+TEST(AboutPage, EnablesDownloadOnlyWhenANewerReleaseCarriesAnInstaller)
 {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());
     auto context = makeContext(directory.path());
     ASSERT_TRUE(context != nullptr);
 
-    Gui::AboutDialog dialog(*context);
+    Gui::AboutPage dialog(*context);
     QPushButton *download = buttonByLabel(dialog, QStringLiteral("下载新版本"));
     ASSERT_TRUE(download != nullptr);
 
@@ -194,13 +198,13 @@ TEST(AboutDialog, EnablesDownloadOnlyWhenANewerReleaseCarriesAnInstaller)
 }
 
 /// 目标文件名来自远端的资产名，不能让它把文件写到 updates/ 以外去。
-TEST(AboutDialog, KeepsTheDownloadedFileNameInsideTheTargetDirectory)
+TEST(AboutPage, KeepsTheDownloadedFileNameInsideTheTargetDirectory)
 {
-    EXPECT_EQ(Gui::AboutDialog::downloadTarget(QStringLiteral("updates"),
+    EXPECT_EQ(Gui::AboutPage::downloadTarget(QStringLiteral("updates"),
                                                QStringLiteral("VCC-1.2.0-win64.exe"),
                                                QStringLiteral("1.2.0")),
               QStringLiteral("updates/VCC-1.2.0-win64.exe"));
-    const QString escaped = Gui::AboutDialog::downloadTarget(
+    const QString escaped = Gui::AboutPage::downloadTarget(
         QStringLiteral("updates"), QStringLiteral("../../../windows/system32/evil.exe"),
         QStringLiteral("1.2.0"));
     EXPECT_FALSE(escaped.contains(QStringLiteral(".."))) << escaped.toStdString();
@@ -209,25 +213,24 @@ TEST(AboutDialog, KeepsTheDownloadedFileNameInsideTheTargetDirectory)
 }
 
 /// 进度那行字：知道总长就给百分比，不知道就只报已收 —— 不编一个假的百分比。
-TEST(AboutDialog, ProgressTextOnlyInventsAPercentageWhenTheSizeIsKnown)
+TEST(AboutPage, ProgressTextOnlyInventsAPercentageWhenTheSizeIsKnown)
 {
     const qint64 meg = 1024 * 1024;
-    EXPECT_EQ(Gui::AboutDialog::progressText(5 * meg, 20 * meg),
+    EXPECT_EQ(Gui::AboutPage::progressText(5 * meg, 20 * meg),
               QStringLiteral("正在下载 5.0 MB / 20.0 MB（25%）"));
-    EXPECT_EQ(Gui::AboutDialog::progressText(0, 0), QStringLiteral("正在下载 0.0 MB…"));
-    EXPECT_FALSE(Gui::AboutDialog::progressText(3 * meg, 0).contains(QChar('%')));
+    EXPECT_EQ(Gui::AboutPage::progressText(0, 0), QStringLiteral("正在下载 0.0 MB…"));
+    EXPECT_FALSE(Gui::AboutPage::progressText(3 * meg, 0).contains(QChar('%')));
 }
 
-/// 关于框自己要有身份：窗口图标 + 品牌行那枚 logo，不能只有两行字。
-TEST(AboutDialog, ShowsTheAppIconAndItsLogoRow)
+/// 关于页顶部要有品牌行：那枚 44px 的 logo 必须真渲染出来，不能只有两行字。
+TEST(AboutPage, ShowsTheAppIconAndItsLogoRow)
 {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());
     auto context = makeContext(directory.path());
     ASSERT_TRUE(context != nullptr);
 
-    Gui::AboutDialog dialog(*context);
-    EXPECT_FALSE(dialog.windowIcon().isNull()) << "标题栏上没有程序图标";
+    Gui::AboutPage dialog(*context);
     QLabel *logo = dialog.findChild<QLabel *>(QStringLiteral("AboutLogo"));
     ASSERT_TRUE(logo != nullptr);
     EXPECT_FALSE(logo->pixmap().isNull()) << "品牌行的 logo 没渲染出来";
@@ -235,14 +238,14 @@ TEST(AboutDialog, ShowsTheAppIconAndItsLogoRow)
 }
 
 /// 进度条平时不占位，只有下载中才出现（检查更新/关闭那两行不该被它撑开）。
-TEST(AboutDialog, ProgressBarStaysHiddenUntilADownloadStarts)
+TEST(AboutPage, ProgressBarStaysHiddenUntilADownloadStarts)
 {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());
     auto context = makeContext(directory.path());
     ASSERT_TRUE(context != nullptr);
 
-    Gui::AboutDialog dialog(*context);
+    Gui::AboutPage dialog(*context);
     QProgressBar *bar = dialog.findChild<QProgressBar *>();
     ASSERT_TRUE(bar != nullptr);
     EXPECT_FALSE(bar->isVisible());
@@ -253,12 +256,12 @@ TEST(AboutDialog, ProgressBarStaysHiddenUntilADownloadStarts)
 }
 
 /// 出口优先级：自己的内核 mixed 端口 > Windows 系统代理 > 直连。
-TEST(AboutDialog, FallsBackToTheSystemProxyWhenNoKernelIsRunning)
+TEST(AboutPage, FallsBackToTheSystemProxyWhenNoKernelIsRunning)
 {
-    EXPECT_EQ(Gui::AboutDialog::pickProxyUrl(QStringLiteral("http://127.0.0.1:10808"),
+    EXPECT_EQ(Gui::AboutPage::pickProxyUrl(QStringLiteral("http://127.0.0.1:10808"),
                                              QStringLiteral("http://127.0.0.1:9980")),
               QStringLiteral("http://127.0.0.1:10808"));
-    EXPECT_EQ(Gui::AboutDialog::pickProxyUrl(QString(), QStringLiteral("http://127.0.0.1:9980")),
+    EXPECT_EQ(Gui::AboutPage::pickProxyUrl(QString(), QStringLiteral("http://127.0.0.1:9980")),
               QStringLiteral("http://127.0.0.1:9980"));
-    EXPECT_TRUE(Gui::AboutDialog::pickProxyUrl(QString(), QString()).isEmpty());
+    EXPECT_TRUE(Gui::AboutPage::pickProxyUrl(QString(), QString()).isEmpty());
 }

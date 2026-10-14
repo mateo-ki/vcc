@@ -19,9 +19,6 @@ class QTimer;
 class QWidget;
 QT_END_NAMESPACE
 
-namespace Gui {
-class AboutDialog;
-}
 
 namespace App {
 class AppContext;
@@ -38,9 +35,9 @@ class NodesPage;
 class SourcesPage;
 
 /// 侧栏五个页签，顺序与 Rust `views/sidebar.rs` 的 nav_item 调用一致。
-enum class Tab { Proxy, Nodes, Sources, Settings, Api };
+enum class Tab { Proxy, Nodes, Sources, Settings, Api, About };
 
-constexpr int kTabCount = 5;
+constexpr int kTabCount = 6;
 
 /// 窗口骨架：左侧 220px 导航 + 右侧内容栈 + 底部状态条。
 class MainWindow : public QMainWindow {
@@ -107,8 +104,6 @@ private:
     /// 报状态，最后按"手动切换"把出口定到那颗节点。
     void lockEgress(const QString &nodeId, const QString &nodeName);
     void checkIpRisk();
-    /// 侧栏「关于」与托盘同名项：一个可复用的非模态对话框（版本 + 仓库 + 检查更新）。
-    void showAboutDialog();
     void toggleProxyMode();
     void speedtestAll();
 

@@ -28,7 +28,7 @@
 #include "api/ApiMessages.h"
 #include "core/Log.h"
 #include "db/Database.h"
-#include "gui/AboutDialog.h"
+#include "gui/AboutPage.h"
 #include "gui/IpRiskDialog.h"
 #include "gui/Icons.h"
 #include "gui/NodesPage.h"
@@ -104,6 +104,7 @@ MainWindow::MainWindow(App::AppContext &context, QWidget *parent)
     pages_->addWidget(sourcesWidget);
     pages_->addWidget(createSettingsPage(context_, pages_));
     pages_->addWidget(createApiPage(context_, pages_));
+    pages_->addWidget(new Gui::AboutPage(context_, pages_));
 
     // Ctrl+V 在**任何一页**都能导入：订阅链接、节点分享链接、JSON 源列表，三路识别都住在
     // SourcesPage::importFromClipboard 里。原来这条挂在订阅源页上，切到控制台/节点池粘贴
@@ -234,6 +235,8 @@ QWidget *MainWindow::buildSidebar()
         {Tab::Sources, UiText::navSubscriptions(), Gui::Icons::Kind::Subscription},
         {Tab::Settings, UiText::navSystemSettings(), Gui::Icons::Kind::Gear},
         {Tab::Api, UiText::navExternalApi(), Gui::Icons::Kind::Plug},
+        // 第六枚是我们自己加的一页（Rust 侧栏只有五枚）：图标是新画的 Info。
+        {Tab::About, QStringLiteral("关于"), Gui::Icons::Kind::Info},
     };
     for (const NavEntry &entry : entries) {
         const Tab tab = entry.tab;
@@ -252,22 +255,6 @@ QWidget *MainWindow::buildSidebar()
         navButtons_.push_back(button);
         box->addWidget(button);
     }
-
-    // 「关于」紧跟在页签下面，读起来就是菜单的一行。它不进取消组、也不进 navButtons_：
-    // 前者会让它长得像被选中的页签，后者有两条测试按 objectName "Nav" 数"侧栏五个页签"。
-    // 外观因此走语义槽模板（Theme::apply 切主题时会重填），颜色与 #Nav 同源。
-    auto *aboutButton = new QPushButton(QStringLiteral("关于"), sidebar);
-    aboutButton->setObjectName(QStringLiteral("AboutNav"));
-    aboutButton->setCursor(Qt::PointingHandCursor);
-    // 图标用新一枚 Info（Rust 侧栏没有"关于"这一行）；换主题时 Theme::apply 会按
-    // navIconKind 属性重画它。
-    Gui::Icons::setNavIcon(aboutButton, Gui::Icons::Kind::Info);
-    Gui::Theme::setWidgetCss(aboutButton,
-        QStringLiteral("QPushButton { background: transparent; color: {sidebarMuted}; border: none;"
-                       " text-align: left; padding: 7px 12px; }"
-                       " QPushButton:hover { color: {accent}; }"));
-    connect(aboutButton, &QPushButton::clicked, this, [this]() { showAboutDialog(); });
-    box->addWidget(aboutButton);
 
     box->addStretch();
     return sidebar;
@@ -460,16 +447,6 @@ void MainWindow::checkIpRisk()
     dialog->exec();
 }
 
-void MainWindow::showAboutDialog()
-{
-    // 非模态：它要在后台问一次 GitHub，用户不该被一颗转圈等的框按住。
-    auto *dialog = new Gui::AboutDialog(context_, this);
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->show();
-    dialog->raise();
-    dialog->activateWindow();
-}
-
 void MainWindow::toggleProxyMode()
 {
     const auto status = context_.proxy().status();
@@ -612,7 +589,11 @@ void MainWindow::initTray()
     });
 
     trayMenu_->addAction(QStringLiteral("关于 VCC"), this, [this]() {
-        showAboutDialog();
+        // 「关于」是一页而不是弹框：从托盘进来要先把窗口带回前台再切过去。
+        showNormal();
+        activateWindow();
+        raise();
+        selectTab(Tab::About);
     });
 
     trayMenu_->addSeparator();

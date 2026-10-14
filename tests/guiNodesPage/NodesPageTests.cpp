@@ -685,6 +685,22 @@ TEST(NodesPageTests, clickingSourcePillSelectsItWithoutRebuildingThePillRow)
         QThread::msleep(10);
     }
     QList<QPushButton *> pills = pillsOf(page);
+    // 订阅排"出现了"不等于"初始化那几轮异步都落地了"：show()/refresh() 之后还会再排
+    // 重建。不等稳就快照，下面"点完比指针"会把初始化那轮的重建算到点击头上（-j8 满载
+    // 时实测就是这么误报的：单独跑 375ms 必过，满载时等满 4s 才崩）。
+    for (int attempt = 0; attempt < 12; ++attempt) {
+        const QList<QPushButton *> settled = pillsOf(page);
+        clock.restart();
+        while (clock.elapsed() < 200) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+        if (settled.size() == 3 && pillsOf(page) == settled) {
+            pills = settled;   // 连续 200ms 是同一批指针才算稳
+            break;
+        }
+        pills = settled;
+    }
     if (pills.size() != 3) {
         QStringList texts;
         for (QPushButton *pill : pills) {

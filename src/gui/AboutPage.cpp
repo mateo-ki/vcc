@@ -1,4 +1,4 @@
-#include "gui/AboutDialog.h"
+#include "gui/AboutPage.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -43,22 +43,22 @@ QString megabytes(qint64 bytes)
 
 } // namespace
 
-QString AboutDialog::repositoryUrl()
+QString AboutPage::repositoryUrl()
 {
     return QString::fromLatin1(kRepository);
 }
 
-QString AboutDialog::releasesUrl()
+QString AboutPage::releasesUrl()
 {
     return repositoryUrl() + QStringLiteral("/releases");
 }
 
-QString AboutDialog::latestReleaseApiUrl()
+QString AboutPage::latestReleaseApiUrl()
 {
     return QStringLiteral("https://api.github.com/repos/mateo-ki/vcc/releases/latest");
 }
 
-QString AboutDialog::updateStatusText(const QString &latestVersion, const QString &currentVersion)
+QString AboutPage::updateStatusText(const QString &latestVersion, const QString &currentVersion)
 {
     const QString latest = Core::releaseVersion(latestVersion);
     if (Core::isUpdateAvailable(latest, currentVersion)) {
@@ -71,7 +71,7 @@ QString AboutDialog::updateStatusText(const QString &latestVersion, const QStrin
     return QStringLiteral("当前 %1 比最新发布版 %2 更新").arg(currentVersion, latest);
 }
 
-QString AboutDialog::failureStatusText(const QString &reason)
+QString AboutPage::failureStatusText(const QString &reason)
 {
     // Releases/latest 对"一个发布都还没建"就是 404。这不是故障，直接说人话，
     // 免得上面那串 HTTP 状态码被当成"更新功能坏了"。
@@ -81,13 +81,13 @@ QString AboutDialog::failureStatusText(const QString &reason)
     return QStringLiteral("检查失败：%1").arg(reason.isEmpty() ? QStringLiteral("未知原因") : reason);
 }
 
-QString AboutDialog::downloadTarget(const QString &directory, const QString &assetName,
+QString AboutPage::downloadTarget(const QString &directory, const QString &assetName,
                                     const QString &version)
 {
     return QDir(directory).filePath(Core::safeInstallerFileName(assetName, version));
 }
 
-QString AboutDialog::progressText(qint64 received, qint64 total)
+QString AboutPage::progressText(qint64 received, qint64 total)
 {
     if (total > 0) {
         const int percent = int(received * 100 / total);
@@ -99,13 +99,11 @@ QString AboutDialog::progressText(qint64 received, qint64 total)
     return QStringLiteral("正在下载 %1…").arg(megabytes(received));
 }
 
-AboutDialog::AboutDialog(App::AppContext &context, QWidget *parent)
-    : QDialog(parent), context_(context)
+AboutPage::AboutPage(App::AppContext &context, QWidget *parent)
+    : Page(context, parent)
 {
-    setWindowTitle(QStringLiteral("关于 VCC"));
-    setWindowIcon(QIcon(QStringLiteral(":/app-icon.png")));
-    setModal(false);
-    resize(520, 340);
+    // 这是一页，不是对话框：没有标题栏，也就没有窗口图标和"关闭"那颗按钮。
+    setObjectName(QStringLiteral("AboutPage"));
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(20, 18, 20, 16);
@@ -170,7 +168,6 @@ AboutDialog::AboutDialog(App::AppContext &context, QWidget *parent)
     openFolderButton_ = new QPushButton(QStringLiteral("打开所在文件夹"), this);
     checkButton_ = new QPushButton(QStringLiteral("检查更新"), this);
     downloadButton_ = new QPushButton(QStringLiteral("下载新版本"), this);
-    auto *closeButton = new QPushButton(QStringLiteral("关闭"), this);
     downloadButton_->setEnabled(false);
     openPageButton_->setEnabled(false);
     openFolderButton_->setEnabled(false);
@@ -179,7 +176,6 @@ AboutDialog::AboutDialog(App::AppContext &context, QWidget *parent)
     actions->addStretch();
     actions->addWidget(checkButton_);
     actions->addWidget(downloadButton_);
-    actions->addWidget(closeButton);
     root->addLayout(actions);
 
     progressTimer_ = new QTimer(this);
@@ -193,10 +189,9 @@ AboutDialog::AboutDialog(App::AppContext &context, QWidget *parent)
     connect(openFolderButton_, &QPushButton::clicked, this, [this]() {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(savedPath_).absolutePath()));
     });
-    connect(closeButton, &QPushButton::clicked, this, &QDialog::close);
 }
 
-QString AboutDialog::pickProxyUrl(const QString &kernelMixed, const QString &systemProxy)
+QString AboutPage::pickProxyUrl(const QString &kernelMixed, const QString &systemProxy)
 {
     if (!kernelMixed.isEmpty()) {
         return kernelMixed;
@@ -207,7 +202,13 @@ QString AboutDialog::pickProxyUrl(const QString &kernelMixed, const QString &sys
     return QString();   // 两条都没有才直连，让对端的失败原样报给用户
 }
 
-QString AboutDialog::updateProxyUrl() const
+void AboutPage::refresh()
+{
+    // 版本号是编译期常量，检查更新是用户点的，运行态也没有要轮询的东西 ——
+    // 但基类要求实现它：切页与后台落地都会调一次，留空就是"这一页不用重画"。
+}
+
+QString AboutPage::updateProxyUrl() const
 {
     const auto status = context_.proxy().status();
     const QString kernelMixed = status.localProxyActive() && status.mixedPort > 0
@@ -217,7 +218,7 @@ QString AboutDialog::updateProxyUrl() const
     return pickProxyUrl(kernelMixed, SysProxy::currentSystemProxyUrl());
 }
 
-void AboutDialog::pollTransfer()
+void AboutPage::pollTransfer()
 {
     if (!transfer_) {
         return;
@@ -233,7 +234,7 @@ void AboutDialog::pollTransfer()
     statusLabel_->setText(progressText(received, total));
 }
 
-void AboutDialog::showUpdateResult(const QString &text, const Core::Release &release)
+void AboutPage::showUpdateResult(const QString &text, const Core::Release &release)
 {
     release_ = release;
     statusLabel_->setText(text);
@@ -246,7 +247,7 @@ void AboutDialog::showUpdateResult(const QString &text, const Core::Release &rel
     }
 }
 
-void AboutDialog::checkForUpdates()
+void AboutPage::checkForUpdates()
 {
     if (checking_) {
         return;
@@ -265,7 +266,7 @@ void AboutDialog::checkForUpdates()
     context_.runAsync(
         [proxyUrl, outcome, release]() {
             Net::Request request;
-            request.url = AboutDialog::latestReleaseApiUrl();
+            request.url = AboutPage::latestReleaseApiUrl();
             request.method = QByteArrayLiteral("GET");
             request.userAgent = QStringLiteral("vcc updater");
             request.headers.append({QStringLiteral("Accept"),
@@ -306,7 +307,7 @@ void AboutDialog::checkForUpdates()
         this);
 }
 
-void AboutDialog::startDownload()
+void AboutPage::startDownload()
 {
     if (downloading_ || release_.assetUrl.isEmpty()) {
         return;
