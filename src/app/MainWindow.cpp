@@ -252,11 +252,10 @@ QWidget *MainWindow::buildSidebar()
         navButtons_.push_back(button);
         box->addWidget(button);
     }
-    box->addStretch();
 
-    // 侧栏最下面那颗「关于」。它不参与 tab 切换，所以既不进 navButtons_，也不能借用
-    // "Nav" 这个 objectName —— 有两条测试按它数"侧栏有五个页签"，借了就变成六个。
-    // 外观走语义槽模板，切主题时由 Theme::apply 重填。
+    // 「关于」紧跟在页签下面，读起来就是菜单的一行。它不进取消组、也不进 navButtons_：
+    // 前者会让它长得像被选中的页签，后者有两条测试按 objectName "Nav" 数"侧栏五个页签"。
+    // 外观因此走语义槽模板（Theme::apply 切主题时会重填），颜色与 #Nav 同源。
     auto *aboutButton = new QPushButton(QStringLiteral("关于"), sidebar);
     aboutButton->setObjectName(QStringLiteral("AboutNav"));
     aboutButton->setCursor(Qt::PointingHandCursor);
@@ -266,6 +265,8 @@ QWidget *MainWindow::buildSidebar()
                        " QPushButton:hover { color: {accent}; }"));
     connect(aboutButton, &QPushButton::clicked, this, [this]() { showAboutDialog(); });
     box->addWidget(aboutButton);
+
+    box->addStretch();
     return sidebar;
 }
 
@@ -705,8 +706,14 @@ void MainWindow::closeEvent(QCloseEvent *event)
     if (!forceQuit_ && context_.settings().closeToTray && trayIcon_ != nullptr && trayIcon_->isVisible()) {
         event->ignore();
         hide();
-        trayIcon_->showMessage(QStringLiteral("VCC"), QStringLiteral("已最小化到系统托盘，后台保持运行"),
-                               QSystemTrayIcon::Information, 1200);
+        // 这句"我们没退，只是进了托盘"只在**这一次运行**里说一遍：它是给第一次见到
+        // "点 X 窗口没了"的人准备的，每次关窗都弹就成了骚扰。
+        if (!trayHintShown_) {
+            trayHintShown_ = true;
+            trayIcon_->showMessage(QStringLiteral("VCC"),
+                                   QStringLiteral("已最小化到系统托盘，后台保持运行"),
+                                   QSystemTrayIcon::Information, 1200);
+        }
     } else {
         event->accept();
     }

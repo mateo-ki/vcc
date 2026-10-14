@@ -132,6 +132,8 @@ private:
     QAction *actToggleProxy_ = nullptr;
     QAction *actQuit_ = nullptr;
     bool forceQuit_ = false;
+    /// 托盘那条"已最小化到托盘"的提示，本次运行只弹一次。
+    bool trayHintShown_ = false;
 
     // 底部控制按钮
     QPushButton *btnSpeedtestAll_ = nullptr;
