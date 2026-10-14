@@ -1,6 +1,24 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Vcc VERSION 1.1.1 LANGUAGES CXX)
+project(Vcc VERSION 1.2.0 LANGUAGES CXX)
+
+# 版本号的真值只有这一处：程序里读 VCC_VERSION_STRING，安装包读 cmake/vcc.iss 的
+# MyAppVersion，而下面这段把两者钉在一起 —— 三处版本号（CMake / .iss / git tag）里
+# 前两处一旦各写各的，"装完一看还是旧版"这类账就没法算了。tag 那一头由 CI 校验。
+add_compile_definitions(VCC_VERSION_STRING="${PROJECT_VERSION}")
+
+file(STRINGS cmake/vcc.iss VCC_ISS_VERSION_LINES REGEX "^#define[ \t]+MyAppVersion")
+list(LENGTH VCC_ISS_VERSION_LINES VCC_ISS_VERSION_COUNT)
+if(NOT VCC_ISS_VERSION_COUNT EQUAL 1)
+    message(FATAL_ERROR
+        "cmake/vcc.iss 里应当只有一行 #define MyAppVersion（实际 ${VCC_ISS_VERSION_COUNT} 行）")
+endif()
+string(REGEX REPLACE ".*\"([^\"]+)\".*" "\\1" VCC_ISS_VERSION "${VCC_ISS_VERSION_LINES}")
+if(NOT VCC_ISS_VERSION STREQUAL PROJECT_VERSION)
+    message(FATAL_ERROR
+        "版本号不一致：project(Vcc VERSION ${PROJECT_VERSION})，但 cmake/vcc.iss 的 MyAppVersion 是 ${VCC_ISS_VERSION}。"
+        "升版本要两处一起升。")
+endif()
 
 # RC（资源脚本）只在 Windows 上有意义：Linux/macOS 上声明它会让 CMake 去找一个
 # 根本不存在的资源编译器。图标 .ico 也只进 Windows 的 vcc.rc。

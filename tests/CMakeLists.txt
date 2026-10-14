@@ -3,6 +3,7 @@ find_package(GTest CONFIG REQUIRED)
 qt_add_executable(vccCoreTests
     core/TimeUtilTests.cpp
     core/HostUtilTests.cpp
+    core/VersionTests.cpp
     models/SettingsTests.cpp
     models/SourceJsonTests.cpp
 )

@@ -28,6 +28,7 @@
 #include "api/ApiMessages.h"
 #include "core/Log.h"
 #include "db/Database.h"
+#include "gui/AboutDialog.h"
 #include "gui/IpRiskDialog.h"
 #include "gui/Icons.h"
 #include "gui/NodesPage.h"
@@ -252,6 +253,19 @@ QWidget *MainWindow::buildSidebar()
         box->addWidget(button);
     }
     box->addStretch();
+
+    // 侧栏最下面那颗「关于」。它不参与 tab 切换，所以既不进 navButtons_，也不能借用
+    // "Nav" 这个 objectName —— 有两条测试按它数"侧栏有五个页签"，借了就变成六个。
+    // 外观走语义槽模板，切主题时由 Theme::apply 重填。
+    auto *aboutButton = new QPushButton(QStringLiteral("关于"), sidebar);
+    aboutButton->setObjectName(QStringLiteral("AboutNav"));
+    aboutButton->setCursor(Qt::PointingHandCursor);
+    Gui::Theme::setWidgetCss(aboutButton,
+        QStringLiteral("QPushButton { background: transparent; color: {sidebarMuted}; border: none;"
+                       " text-align: left; padding: 7px 12px; }"
+                       " QPushButton:hover { color: {accent}; }"));
+    connect(aboutButton, &QPushButton::clicked, this, [this]() { showAboutDialog(); });
+    box->addWidget(aboutButton);
     return sidebar;
 }
 
@@ -442,6 +456,16 @@ void MainWindow::checkIpRisk()
     dialog->exec();
 }
 
+void MainWindow::showAboutDialog()
+{
+    // 非模态：它要在后台问一次 GitHub，用户不该被一颗转圈等的框按住。
+    auto *dialog = new Gui::AboutDialog(context_, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
+}
+
 void MainWindow::toggleProxyMode()
 {
     const auto status = context_.proxy().status();
@@ -581,6 +605,10 @@ void MainWindow::initTray()
 
     actToggleProxy_ = trayMenu_->addAction(QStringLiteral("启动代理"), this, [this]() {
         toggleProxy();
+    });
+
+    trayMenu_->addAction(QStringLiteral("关于 VCC"), this, [this]() {
+        showAboutDialog();
     });
 
     trayMenu_->addSeparator();

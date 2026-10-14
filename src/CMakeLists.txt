@@ -6,6 +6,7 @@ add_library(vccCore STATIC
     core/Ids.cpp
     core/Log.cpp
     core/TimeUtil.cpp
+    core/Version.cpp
 )
 
 target_include_directories(vccCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
