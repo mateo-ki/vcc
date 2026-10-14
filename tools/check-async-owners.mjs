@@ -81,6 +81,7 @@ function walk(dir) {
 }
 
 const offenders = [];
+const workOffenders = [];
 for (const file of walk('src')) {
     const text = fs.readFileSync(file, 'utf8');
     const scan = /runAsync\(/g;
@@ -91,24 +92,40 @@ for (const file of walk('src')) {
             break;
         }
         const call = text.slice(match.index, parsed.end + 1);
+        const line = () => text.slice(0, match.index).split('\n').length;
         if (parsed.args.length === 2) {
             const captured = /\[\s*([^\]]*)\]/.exec(parsed.args[1]);
             const capturesThis = captured !== null && /\bthis\b/.test(captured[1]);
             if (capturesThis && !/QPointer/.test(call)) {
-                offenders.push(`${file}:${text.slice(0, match.index).split('\n').length}`);
+                offenders.push(`${file}:${line()}`);
             }
+        }
+        // work 跑在池线程上：裸捕 this 意味着页面一旦先关，那条线程就在读已释放的对象，
+        // 而 GUI 线程这时还在画 —— 需要的东西（本项目里恒为 context_）要在派发前抄成值。
+        const workCaptured = /\[\s*([^\]]*)\]/.exec(parsed.args[0] ?? '');
+        if (workCaptured !== null && /\bthis\b/.test(workCaptured[1])) {
+            workOffenders.push(`${file}:${line()}`);
         }
         scan.lastIndex = parsed.end;
         match = scan.exec(text);
     }
 }
 
+if (workOffenders.length > 0) {
+    console.error(`runAsync work captures raw this (pool thread reads a possibly dead widget) in ${workOffenders.length} place(s):`);
+    for (const where of workOffenders) {
+        console.error(`  ${where}`);
+    }
+    console.error('capture the context pointer instead: [ctx = &context_, ...] and use ctx->...');
+}
 if (offenders.length > 0) {
     console.error(`runAsync onUi captures raw this with no owner guard in ${offenders.length} place(s):`);
     for (const where of offenders) {
         console.error(`  ${where}`);
     }
     console.error('pass `this` as the third argument (uiOwner), or hold a QPointer in the continuation');
+}
+if (offenders.length > 0 || workOffenders.length > 0) {
     process.exit(1);
 }
-console.log('async owner ok: every runAsync continuation that touches this is guarded');
+console.log('async owner ok: no runAsync continuation touches this without a guard');

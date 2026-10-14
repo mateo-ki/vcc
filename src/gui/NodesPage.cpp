@@ -471,8 +471,8 @@ void NodesPage::reloadGroups()
     auto resultBox = std::make_shared<Result<QVector<Models::NodeGroupSummary>>>(
         Result<QVector<Models::NodeGroupSummary>>::withValue(QVector<Models::NodeGroupSummary>()));
     QPointer<NodesPage> guard(this);
-    context_.runAsync([this, resultBox]() {
-        *resultBox = context_.database().listNodeGroups(std::nullopt, std::nullopt, std::nullopt);
+    context_.runAsync([ctx = &context_, resultBox]() {
+        *resultBox = ctx->database().listNodeGroups(std::nullopt, std::nullopt, std::nullopt);
     }, [guard, resultBox]() {
         if (guard.isNull() || resultBox->isErr()) {
             return;
@@ -585,8 +585,8 @@ void NodesPage::reloadNodes()
         Result<Models::Page<Models::NodeSummary>>::withValue(Models::Page<Models::NodeSummary>()));
     QPointer<NodesPage> guard(this);
 
-    context_.runAsync([this, proto, sid, keyword, latency, region, curPage, curPageSize, sort, resultBox]() {
-        *resultBox = context_.database().listNodes(proto, sid, keyword, latency, region, curPage, curPageSize, sort);
+    context_.runAsync([ctx = &context_, proto, sid, keyword, latency, region, curPage, curPageSize, sort, resultBox]() {
+        *resultBox = ctx->database().listNodes(proto, sid, keyword, latency, region, curPage, curPageSize, sort);
     }, [guard, resultBox]() {
         if (guard.isNull()) {
             return;
@@ -656,8 +656,8 @@ void NodesPage::speedtestNode(const QString &nodeId)
     emit statusMessageRequested(UiText::speedOneStatus());
     QPointer<NodesPage> guard(this);
     auto outcome = std::make_shared<Result<Models::SpeedTestSummary>>();
-    context_.runAsync([this, nodeId, opt, outcome]() {
-        Speedtest::SpeedTester tester(context_.database().shared_from_this(), context_.tasks());
+    context_.runAsync([ctx = &context_, nodeId, opt, outcome]() {
+        Speedtest::SpeedTester tester(ctx->database().shared_from_this(), ctx->tasks());
         auto one = tester.testOne(nodeId, opt);
         if (one.isErr()) {
             *outcome = Result<Models::SpeedTestSummary>::withError(one.error());
@@ -743,8 +743,8 @@ void NodesPage::speedtestSource(const QString &sourceId)
     const QString sid = sourceId;
     QPointer<NodesPage> guard(this);
     auto outcome = std::make_shared<Result<Models::SpeedTestSummary>>();
-    context_.runAsync([this, sid, protocol, keyword, latency, opt, outcome, guard]() {
-        auto idsRes = context_.database().listNodeIdsForGroup(sid, protocol, keyword, latency);
+    context_.runAsync([ctx = &context_, sid, protocol, keyword, latency, opt, outcome, guard]() {
+        auto idsRes = ctx->database().listNodeIdsForGroup(sid, protocol, keyword, latency);
         if (!idsRes.isOk()) {
             *outcome = Result<Models::SpeedTestSummary>::withError(idsRes.error());
             return;
@@ -753,7 +753,7 @@ void NodesPage::speedtestSource(const QString &sourceId)
             *outcome = Result<Models::SpeedTestSummary>::withError(UiText::speedGroupEmpty());
             return;
         }
-        Speedtest::SpeedTester tester(context_.database().shared_from_this(), context_.tasks());
+        Speedtest::SpeedTester tester(ctx->database().shared_from_this(), ctx->tasks());
         *outcome = tester.testManyWithProgress(
             idsRes.value(), opt, [guard](const Speedtest::SpeedTestProgress &p) {
                 if (guard.isNull()) {
@@ -789,8 +789,8 @@ void NodesPage::speedtestAll()
     QPointer<NodesPage> guard(this);
     auto outcome = std::make_shared<Result<Models::SpeedTestSummary>>();
     const Speedtest::SpeedTestOptions opt = speedOptions();
-    context_.runAsync([this, opt, outcome, guard]() {
-        Speedtest::SpeedTester tester(context_.database().shared_from_this(), context_.tasks());
+    context_.runAsync([ctx = &context_, opt, outcome, guard]() {
+        Speedtest::SpeedTester tester(ctx->database().shared_from_this(), ctx->tasks());
         *outcome = tester.testAllSourcesWithProgress(opt, [guard](size_t done, size_t total) {
             if (guard.isNull()) {
                 return;
@@ -828,10 +828,10 @@ void NodesPage::importFromClipboard()
     }
     emit statusMessageRequested(QStringLiteral("正在从剪贴板解析导入..."));
     QPointer<NodesPage> guard(this);
-    context_.runAsync([this, text]() {
+    context_.runAsync([ctx = &context_, text]() {
         const auto nodes = Parser::parseSubscription(text, QString());
         if (!nodes.isEmpty()) {
-            context_.database().importNodes(nodes);
+            ctx->database().importNodes(nodes);
         }
     }, [guard]() {
         if (!guard.isNull()) {
@@ -869,19 +869,19 @@ void NodesPage::cleanupNodes(const QString &action)
 {
     emit statusMessageRequested(QStringLiteral("正在执行节点清理..."));
     QPointer<NodesPage> guard(this);
-    context_.runAsync([this, action]() {
+    context_.runAsync([ctx = &context_, action]() {
         if (action == QStringLiteral("dead")) {
-            context_.database().deleteDeadNodes();
+            ctx->database().deleteDeadNodes();
         } else if (action == QStringLiteral("invalid")) {
-            context_.database().deleteInvalidHosts();
+            ctx->database().deleteInvalidHosts();
         } else if (action == QStringLiteral("physical")) {
-            context_.database().deduplicatePhysical();
+            ctx->database().deduplicatePhysical();
         } else if (action == QStringLiteral("dedupe")) {
-            context_.database().dedupeNodes();
+            ctx->database().dedupeNodes();
         } else if (action == QStringLiteral("clean_names")) {
-            context_.database().cleanAndBeautifyNodeNames();
+            ctx->database().cleanAndBeautifyNodeNames();
         } else if (action == QStringLiteral("clear_all")) {
-            context_.database().clearNodes();
+            ctx->database().clearNodes();
         }
     }, [guard]() {
         if (!guard.isNull()) {

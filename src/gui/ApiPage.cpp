@@ -435,11 +435,11 @@ void ApiPage::updateServerStatusUi()
 void ApiPage::startApiServer()
 {
     statusFeedbackLabel_->setText(QStringLiteral("正在启动 HTTP API 服务器..."));
-    context_.runAsync([this]() {
-        context_.apiServer().start();
+    context_.runAsync([ctx = &context_]() {
+        ctx->apiServer().start();
         Models::UpdateSettings patch;
         patch.httpServerEnabled = true;
-        context_.saveSettings(patch);
+        ctx->saveSettings(patch);
     }, [this]() {
         refresh();
         statusFeedbackLabel_->setText(QStringLiteral("HTTP API 服务器已启动"));
@@ -449,11 +449,11 @@ void ApiPage::startApiServer()
 void ApiPage::stopApiServer()
 {
     statusFeedbackLabel_->setText(QStringLiteral("正在停止 HTTP API 服务器..."));
-    context_.runAsync([this]() {
-        context_.apiServer().stop();
+    context_.runAsync([ctx = &context_]() {
+        ctx->apiServer().stop();
         Models::UpdateSettings patch;
         patch.httpServerEnabled = false;
-        context_.saveSettings(patch);
+        ctx->saveSettings(patch);
         Platform::trimWorkingSet();
     }, [this]() {
         refresh();

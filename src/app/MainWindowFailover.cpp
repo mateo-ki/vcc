@@ -74,8 +74,8 @@ void MainWindow::switchProxyNode(const QString &nodeId, const QString &nodeName,
     // 这颗节点标掉 —— 不然测速表里它还是"可用"，下一次又会被选中。
     auto outcome = std::make_shared<Status>();
     context_.runAsync(
-        [this, node, wasRunning, outcome]() {
-            *outcome = wasRunning ? context_.proxy().switchNode(node) : context_.proxy().start(node);
+        [ctx = &context_, node, wasRunning, outcome]() {
+            *outcome = wasRunning ? ctx->proxy().switchNode(node) : ctx->proxy().start(node);
         },
         [this, node, nodeName, wasRunning, outcome]() {
             if (outcome->isErr()) {
@@ -416,7 +416,7 @@ void MainWindow::startHandoffNode(const QString &nodeId)
     updateStatusControls();
     auto outcome = std::make_shared<Status>();
     context_.runAsync(
-        [this, node, outcome]() { *outcome = context_.proxy().start(node); },
+        [ctx = &context_, node, outcome]() { *outcome = ctx->proxy().start(node); },
         [this, node, outcome]() {
             if (outcome->isErr()) {
                 markNodeUnavailable(node.id);

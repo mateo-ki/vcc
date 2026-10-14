@@ -344,7 +344,7 @@ void MainWindow::toggleProxy()
     if (status.localProxyActive()) {
         statusLabel_->setText(QStringLiteral("正在停止代理..."));
         context_.runAsync(
-            [this]() { context_.proxy().stop(); },
+            [ctx = &context_]() { ctx->proxy().stop(); },
             [this]() {
                 statusLabel_->setText(QStringLiteral("代理已停止"));
                 updateStatusControls();
@@ -369,7 +369,7 @@ void MainWindow::toggleProxy()
         const auto node = nodeRes.value();
         auto outcome = std::make_shared<Status>();
         context_.runAsync(
-            [this, node, outcome]() { *outcome = context_.proxy().start(node); },
+            [ctx = &context_, node, outcome]() { *outcome = ctx->proxy().start(node); },
             [this, node, outcome]() {
                 const auto curStatus = context_.proxy().status();
                 if (outcome->isErr()) {
@@ -501,8 +501,8 @@ void MainWindow::speedtestAll()
     QPointer<MainWindow> guard(this);
     auto outcome = std::make_shared<Result<Models::SpeedTestSummary>>();
     context_.runAsync(
-        [this, guard, options, outcome]() {
-            Speedtest::SpeedTester tester(context_.databasePtr(), *context_.tasksPtr());
+        [ctx = &context_, guard, options, outcome]() {
+            Speedtest::SpeedTester tester(ctx->databasePtr(), *ctx->tasksPtr());
             *outcome = tester.testAllSourcesWithProgress(options, [guard](size_t done, size_t total) {
                 if (guard.isNull()) return;
                 QMetaObject::invokeMethod(guard.data(), [guard, done, total]() {
