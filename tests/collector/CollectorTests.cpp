@@ -1,10 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QHostAddress>
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QVector>
@@ -352,6 +356,57 @@ TEST(CollectorTests, hanging_source_is_capped_by_the_total_budget)
         << "总预算被突破: " << qint64(started.elapsed());
     ASSERT_EQ(served->load(), 1);
     ASSERT_EQ(reload(db, source.id).failStreak, 1);
+}
+
+/// 真传输（Net::send，不是假 transport）跑在 Collector 的传输线程上，分段超时必须真的响。
+/// 回归的那条 bug：传输曾经在裸 std::thread 上跑，Qt 的定时器在那种线程上不进事件分发器，
+/// 于是 6s 的响应头预算永远不落地，每条死源都要烧满外层看门狗（budget+2s=32s）才回，
+/// 那条分离线程还留在原地挂着。这里用 127.0.0.1 上"接了连接一个字都不回"的假服务器复现，
+/// 不碰真实网络。
+TEST(CollectorTests, real_transport_answers_on_its_own_header_budget)
+{
+    // 这条用例不注入 transport，走真 Net::send：Qt 的网络后端要有 QCoreApplication
+    // 才建得起来（本二进制的 main 是 gtest_main 那份，没有 app 实例）。
+    static int appArgc = 0;
+    static QCoreApplication app(appArgc, nullptr);
+
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const std::shared_ptr<Database> db = openDatabase(dir);
+    ASSERT_NE(db, nullptr);
+
+    QTcpServer silent;
+    ASSERT_TRUE(silent.listen(QHostAddress(QHostAddress::LocalHost), 0));
+    std::vector<QTcpSocket *> held;
+    QObject::connect(&silent, &QTcpServer::newConnection, &silent,
+                     [&held, &silent] {
+                         while (QTcpSocket *socket = silent.nextPendingConnection()) {
+                             held.push_back(socket); // 握住，不回话
+                         }
+                     });
+
+    const QString url = QStringLiteral("http://127.0.0.1:%1/subscription").arg(silent.serverPort());
+    const Models::Source created = createSource(db, QStringLiteral("stall"), url);
+    // 连错三次进降级：maxAttempts=1，这一条用例只跑一次拉取，别把重试时间混进来。
+    for (int index = 0; index < 3; ++index) {
+        ASSERT_TRUE(db->recordFetchOutcome(created.id, false, true).isOk());
+    }
+    const Models::Source source = reload(db, created.id);
+    ASSERT_GE(source.failStreak, 3);
+
+    Tasks::TaskTracker tracker;
+    Collector::Collector collector(db, tracker); // 默认 transport = Net::send
+    const QString taskId = tracker.start(Tasks::Kind::Fetch, {{source.id, source.name}});
+
+    QElapsedTimer started;
+    started.start();
+    const Models::FetchResult result = collector.fetchSourceInTask(source, taskId, 30000);
+    const qint64 elapsed = started.elapsed();
+
+    ASSERT_FALSE(result.success) << result.message.toStdString();
+    // 响应头预算 6s；看门狗要到 32s 才响，所以 12s 这条线只有"内层预算真的生效"才过得去。
+    ASSERT_LT(elapsed, 12000) << "没按响应头预算放手（外层看门狗兜的）: "
+                              << elapsed << "ms, message=" << result.message.toStdString();
 }
 
 /// 对应 Rust `network_failure_counts_one_streak_per_fetch`（:1303）。

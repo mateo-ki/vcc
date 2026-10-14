@@ -349,6 +349,13 @@ Result<Response> send(const Request &request)
                                   .toByteArray();
     reply->deleteLater();
 
+    // 整体时限到点：reply->abort() 之后 Qt 报的是取消错，但状态码属性里还留着上一跳的码。
+    // Rust 的 timeout() 罩住 send + 读体全过程，到点一律算传输失败 —— 让 status>0 把它
+    // 短路成一次成功响应，等于把半截正文洗成完整下载。
+    if (timedOut) {
+        return Result<Response>::withError(transport);
+    }
+
     sinkCommitted = response.status >= 200 && response.status < 300;
 
     if (transport.isEmpty() || response.status > 0) {

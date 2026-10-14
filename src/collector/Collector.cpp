@@ -339,15 +339,35 @@ void Collector::fail(const QString &taskId, const QString &sourceId, const QStri
     detail_->tasks.fail(taskId, sourceId, error);
 }
 
+/// 传输必须跑在 Qt 线程上：Qt 的定时器和 socket 通知只认 QThread 的事件分发器。
+/// 裸 std::thread 里 Net::send 的分段超时一个都不响 —— 实测同一条"接了连接不回话"的请求，
+/// 主线程 1030ms 回、QThread 990ms 回、裸 std::thread 到 12s 仍卡死（header 预算只有 1s）。
+/// 所以以前每条死源都要烧满外层 deadline（budget+2s=32s）才回，分离线程本身永久泄漏。
+namespace {
+
+QThreadPool &transportPool()
+{
+    static QThreadPool pool;
+    static const bool configured = [pool_ptr = &pool] {
+        pool_ptr->setExpiryTimeout(30000);
+        pool_ptr->setMaxThreadCount(qMax(16, QThread::idealThreadCount()));
+        return true;
+    }();
+    Q_UNUSED(configured);
+    return pool;
+}
+
+} // namespace
+
 Collector::SendOutcome Collector::sendWithHeaderDeadline(const Net::Request &request,
                                                          qint64 deadlineMs) const
 {
     SendOutcome outcome;
-    // transport 按值抓走：分离线程可能在 Collector 析构后才跑完（同 Rust 的 abort 语义，
+    // transport 按值抓走：传输任务可能在 Collector 析构之后才跑完（同 Rust 的 abort 语义，
     // 结果没人要，但对象必须还活着）。
     const Transport transport = detail_->transport;
     auto state = std::make_shared<DeadlineState>();
-    std::thread([transport, request, state]() {
+    transportPool().start([transport, request, state]() {
         Result<Net::Response> result = Result<Net::Response>::withError(
             QStringLiteral("request failed: transport produced no result"));
         try {
@@ -365,7 +385,7 @@ Collector::SendOutcome Collector::sendWithHeaderDeadline(const Net::Request &req
             state->done = true;
         }
         state->condition.notify_all();
-    }).detach();
+    });
 
     std::unique_lock<std::mutex> lock(state->mutex);
     if (!state->condition.wait_for(lock, std::chrono::milliseconds(deadlineMs),
@@ -658,9 +678,8 @@ Result<std::optional<Downloaded>> Collector::raceCandidates(
         failures = state->failures;
     }
     if (haveWinner) {
-        // :404-407 —— 赢家那条腿（哪怕是 304）都要记下这次用的来源。落败的腿继续在后台
-        // 跑到自己超时为止：Rust 那边是 abort_all，这里 Net::send 不可中断，只多占一会儿
-        // 带宽和闸。
+        // :404-407 —— 赢家那条腿（哪怕是 304）都要记下这次用的来源。落败的腿收到取消哨兵后
+        // 自己放手（Net::Request::cancel），闸位随它们各自返回而归还。
         const Status recorded = detail_->db->setSourceFetchHost(source.id, winnerHost);
         if (recorded.isErr()) {
             Log::warn(QStringLiteral("set_source_fetch_host failed: %1").arg(recorded.error()));
