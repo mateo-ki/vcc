@@ -354,3 +354,14 @@ TEST(AboutPageRenders, dumpsThePageToAPng)
     QCoreApplication::processEvents();
     ASSERT_TRUE(page.grab().save(out));
 }
+
+/// 装之前那句确认：要报清版本号、说清"会停代理"，也不能把还没发生的事写成已完成。
+TEST(AboutPage, InstallPromptSaysWhatIsAboutToHappen)
+{
+    const QString text = Gui::AboutPage::installPromptText(QStringLiteral("1.1.1"));
+    EXPECT_TRUE(text.contains(QStringLiteral("1.1.1")));
+    EXPECT_TRUE(text.contains(QStringLiteral("sha256")));
+    EXPECT_TRUE(text.contains(QStringLiteral("停止正在运行的代理"))) << "退出会连带停代理，这句必须说";
+    EXPECT_TRUE(text.contains(QChar(10))) << "两行更好读";
+    EXPECT_FALSE(text.contains(QStringLiteral("已安装")));
+}

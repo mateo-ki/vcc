@@ -59,6 +59,8 @@ public:
     };
     static DownloadPlan planForDownload(Kernel::Source channel, const QString &assetUrl,
                                         const QString &kernelMixed, const QString &systemProxy);
+    /// 确认框那句话（纯函数，测试钉它：必须报版本号，也不能假装已经装了）。
+    static QString installPromptText(const QString &version);
     /// 校验值来自 GitHub（api.github.com），比对的是落盘文件的 sha256。
     /// 没有校验值时镜像那条路直接拒绝，不"先下下来再说"。
     static QString digestHex(const QString &assetDigest);
@@ -74,6 +76,9 @@ private:
 
     void checkForUpdates();
     void startDownload();
+    /// 下载并校验通过之后：问一句，然后起安装器并退出本程序。
+    /// 留这一道确认是因为退出会顺带停掉正在跑的代理，不该在用户没准备时发生。
+    void offerInstall();
     /// 这条链路（检查 + 下载）该走哪个出口：自己的内核 mixed 端口优先，其次系统代理。
     QString updateProxyUrl() const;
     /// 下载期间每 100ms 读一次 worker 写的计数：进度只有这一个来源，

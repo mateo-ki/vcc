@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
@@ -13,7 +14,9 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QFrame>
+#include <QMessageBox>
 #include <QPixmap>
+#include <QProcess>
 #include <QScrollArea>
 #include <QProgressBar>
 #include <QPushButton>
@@ -277,6 +280,13 @@ AboutPage::DownloadPlan AboutPage::planForDownload(Kernel::Source channel, const
     }
 }
 
+QString AboutPage::installPromptText(const QString &version)
+{
+    return QStringLiteral("VCC %1 已下载并通过 sha256 校验。\n"
+                          "现在退出本软件并运行安装程序吗？（退出会同时停止正在运行的代理）")
+        .arg(version);
+}
+
 QString AboutPage::digestHex(const QString &assetDigest)
 {
     const QString prefix = QStringLiteral("sha256:");
@@ -460,6 +470,34 @@ std::optional<Kernel::Source> chooseChannel(QWidget *parent, const QList<Kernel:
 
 } // namespace
 
+void AboutPage::offerInstall()
+{
+    if (savedPath_.isEmpty()) {
+        return;
+    }
+    const QString version = release_.version.isEmpty() ? Core::appVersion() : release_.version;
+    downloadButton_->setText(QStringLiteral("安装并退出"));
+    switch (QMessageBox::question(this, QStringLiteral("安装新版本"), installPromptText(version),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes)) {
+    case QMessageBox::Yes:
+        break;
+    default:
+        // 不装也随时装得起来：按钮已经改成"安装再退出"，文件夹也给了入口。
+        statusLabel_->setText(QStringLiteral("已下载好：%1（点「安装并退出」即可继续）").arg(savedPath_));
+        return;
+    }
+
+    QString error;
+    if (!QProcess::startDetached(savedPath_, {}, QFileInfo(savedPath_).absolutePath(), nullptr)) {
+        error = QStringLiteral("起不动安装程序，请自己双击：%1").arg(savedPath_);
+        statusLabel_->setText(error);
+        return;
+    }
+    // 先让 aboutToQuit 那套收尾跑完（停代理、释放单实例锁），再退出。
+    statusLabel_->setText(QStringLiteral("正在退出并安装 %1…").arg(version));
+    qApp->quit();
+}
+
 void AboutPage::startDownload()
 {
     if (downloading_ || release_.assetUrl.isEmpty()) {
@@ -585,8 +623,8 @@ void AboutPage::startDownload()
             progressBar_->setValue(100);
             savedPath_ = outcome->value();
             openFolderButton_->setEnabled(true);
-            // 到此为止：装不装由人自己点这个文件，程序不替他起安装器。
-            statusLabel_->setText(QStringLiteral("下载完成：%1").arg(savedPath_));
+            statusLabel_->setText(QStringLiteral("下载完成（sha256 已校验）：%1").arg(savedPath_));
+            offerInstall();
         },
         this);
 }
