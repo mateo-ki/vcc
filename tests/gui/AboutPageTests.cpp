@@ -14,6 +14,7 @@
 #include "core/Result.h"
 #include "core/Version.h"
 #include "gui/AboutPage.h"
+#include "gui/Theme.h"
 #include "kernel/KernelSource.h"
 
 namespace {
@@ -238,7 +239,9 @@ TEST(AboutPage, ShowsTheAppIconAndItsLogoRow)
     QLabel *logo = dialog.findChild<QLabel *>(QStringLiteral("AboutLogo"));
     ASSERT_TRUE(logo != nullptr);
     EXPECT_FALSE(logo->pixmap().isNull()) << "品牌行的 logo 没渲染出来";
-    EXPECT_EQ(logo->pixmap().width(), 44) << "品牌行的 logo 就是侧栏那一枚的尺寸";
+    // 不小于侧栏那枚品牌图（44）；页面里的品牌行可以更大，但不许缩回图标级尺寸。
+    EXPECT_GE(logo->pixmap().width(), 44);
+    EXPECT_EQ(logo->pixmap().width(), logo->pixmap().height()) << "logo 被拉变形了";
 }
 
 /// 进度条平时不占位，只有下载中才出现（检查更新/关闭那两行不该被它撑开）。
@@ -320,4 +323,34 @@ TEST(AboutPage, ReadsOnlyASha256Digest)
               QStringLiteral("5d585eb8"));
     EXPECT_TRUE(Gui::AboutPage::digestHex(QStringLiteral("md5:abcdef")).isEmpty());
     EXPECT_TRUE(Gui::AboutPage::digestHex(QString()).isEmpty());
+}
+
+/// 离屏渲一张图，改前改后拿像素说话（和 IconSheet 同一个套路：设了环境变量才跑）。
+/// 用法：VCC_ABOUT_SHOT=C:\path\about.png 然后跑 --gtest_filter=AboutPageRenders.*
+TEST(AboutPageRenders, dumpsThePageToAPng)
+{
+    const QString out = qEnvironmentVariable("VCC_ABOUT_SHOT");
+    if (out.isEmpty()) {
+        GTEST_SKIP() << "no VCC_ABOUT_SHOT, nothing to render";
+    }
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto context = makeContext(directory.path());
+    ASSERT_TRUE(context != nullptr);
+
+    Gui::Theme::apply(QString());
+    qApp->setStyleSheet(Gui::Theme::styleSheet(Gui::Theme::current()));
+
+    Gui::AboutPage page(*context);
+    Core::Release release;
+    release.version = QStringLiteral("1.1.1");
+    release.url = QStringLiteral("https://github.com/mateo-ki/vcc/releases/tag/v1.1.1");
+    release.assetName = QStringLiteral("VCC-1.1.1-win64.exe");
+    release.assetUrl = QStringLiteral("https://github.com/mateo-ki/vcc/releases/download/v1.1.1/VCC-1.1.1-win64.exe");
+    release.assetSize = 23310883;
+    page.showUpdateResult(QStringLiteral("发现新版本 1.1.1（当前 1.0.0）"), release);
+    page.resize(1000, 700);
+    page.show();
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(page.grab().save(out));
 }

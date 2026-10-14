@@ -12,7 +12,9 @@
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
+#include <QFrame>
 #include <QPixmap>
+#include <QScrollArea>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QTimer>
@@ -26,6 +28,7 @@
 #include "core/Crypto.h"
 #include "core/Version.h"
 #include "kernel/KernelSource.h"
+#include "gui/Theme.h"
 #include "gui/UiText.h"
 #include "net/HttpClient.h"
 #include "proxy/ProxyManager.h"
@@ -108,72 +111,111 @@ QString AboutPage::progressText(qint64 received, qint64 total)
 AboutPage::AboutPage(App::AppContext &context, QWidget *parent)
     : Page(context, parent)
 {
-    // 这是一页，不是对话框：没有标题栏，也就没有窗口图标和"关闭"那颗按钮。
+    // 它是一页，不是对话框：没有标题栏，也就没有窗口图标和"关闭"那颗按钮。
     setObjectName(QStringLiteral("AboutPage"));
 
-    auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(20, 18, 20, 16);
-    root->setSpacing(10);
+    auto *outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
 
-    // 品牌行：图标 + 名字/副标题，和侧栏顶部那一行同一枚图。
-    auto *head = new QHBoxLayout();
-    head->setSpacing(10);
-    constexpr int kLogoSize = 44;
-    auto *logo = new QLabel(this);
+    // 和其它页一样：滚动区 + 一张一张卡片。裸标签浮在页面底色上就是"没做完"的样子。
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+    outer->addWidget(scroll);
+
+    auto *content = new QWidget(scroll);
+    content->setObjectName(QStringLiteral("AboutContent"));
+    content->setAttribute(Qt::WA_StyledBackground, true);
+    auto *column = new QVBoxLayout(content);
+    column->setContentsMargins(22, 20, 22, 20);
+    column->setSpacing(14);
+    scroll->setWidget(content);
+
+    // ---- 第一张：这是谁、什么版本、代码在哪 ----
+    auto *identity = new QFrame(content);
+    Theme::decorateCard(identity);
+    auto *identityBox = new QVBoxLayout(identity);
+    identityBox->setContentsMargins(18, 16, 18, 16);
+    identityBox->setSpacing(12);
+    auto *identityRow = new QHBoxLayout();
+    identityRow->setSpacing(14);
+
+    constexpr int kLogoSize = 52;
+    auto *logo = new QLabel(identity);
     logo->setObjectName(QStringLiteral("AboutLogo"));
     logo->setFixedSize(kLogoSize, kLogoSize);
     logo->setScaledContents(true);
     logo->setPixmap(QPixmap(QStringLiteral(":/app-icon.png")).scaled(
         kLogoSize, kLogoSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    head->addWidget(logo);
-    auto *headText = new QVBoxLayout();
-    headText->setSpacing(1);
-    auto *title = new QLabel(QStringLiteral("VCC"), this);
-    title->setObjectName(QStringLiteral("Title"));
-    title->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: 700;"));
-    auto *subtitle = new QLabel(UiText::brandSubtitle(), this);
-    subtitle->setObjectName(QStringLiteral("Subtitle"));
-    headText->addWidget(title);
-    headText->addWidget(subtitle);
-    head->addLayout(headText);
-    head->addStretch();
-    root->addLayout(head);
+    identityRow->addWidget(logo);
 
-    auto *lines = new QVBoxLayout();
-    lines->setSpacing(2);
-    for (const QString &line : {field(QStringLiteral("版本"), Core::appVersion()),
-                                field(QStringLiteral("开源仓库"), repositoryUrl()),
-                                field(QStringLiteral("许可证"), QStringLiteral("Apache-2.0")),
-                                QStringLiteral("本开源项目已链接并认可 LINUX DO 社区")}) {
-        auto *label = new QLabel(line, this);
-        label->setObjectName(QStringLiteral("Body"));
-        label->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        lines->addWidget(label);
+    auto *brand = new QVBoxLayout();
+    brand->setSpacing(3);
+    auto *title = new QLabel(QStringLiteral("VCC"), identity);
+    title->setStyleSheet(QStringLiteral("font-size: 20px; font-weight: 700;"));
+    auto *subtitle = new QLabel(UiText::brandSubtitle(), identity);
+    Theme::setWidgetCss(subtitle, QStringLiteral("color: {muted}; font-size: 12px;"));
+    auto *version = new QLabel(QStringLiteral("版本 %1").arg(Core::appVersion()), identity);
+    Theme::setWidgetCss(version, QStringLiteral("color: {textSecondary}; font-size: 12px;"));
+    brand->addWidget(title);
+    brand->addWidget(subtitle);
+    brand->addWidget(version);
+    identityRow->addLayout(brand);
+    identityRow->addStretch();
+
+    auto *links = new QVBoxLayout();
+    links->setSpacing(3);
+    auto *repo = new QLabel(QStringLiteral("开源仓库 %1").arg(repositoryUrl()), identity);
+    repo->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    auto *licence = new QLabel(QStringLiteral("许可证 Apache-2.0"), identity);
+    auto *community = new QLabel(QStringLiteral("本开源项目已链接并认可 LINUX DO 社区"), identity);
+    community->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    for (QLabel *label : {repo, licence, community}) {
+        Theme::setWidgetCss(label, QStringLiteral("color: {textSecondary}; font-size: 12px;"));
+        links->addWidget(label);
     }
-    root->addLayout(lines);
-    root->addSpacing(4);
+    // 三行信息跟在品牌行下面、和文字块左边缘对齐：把它们推到最右，中间就裂开一大块空。
+    identityBox->addLayout(identityRow);
+    auto *linkIndent = new QHBoxLayout();
+    linkIndent->setContentsMargins(kLogoSize + 14, 0, 0, 0);
+    linkIndent->addLayout(links);
+    linkIndent->addStretch();
+    identityBox->addLayout(linkIndent);
+    column->addWidget(identity);
 
-    statusLabel_ = new QLabel(QStringLiteral("还没检查过更新"), this);
-    statusLabel_->setObjectName(QStringLiteral("Body"));
+    // ---- 第二张：更新 ----
+    auto *updates = new QFrame(content);
+    Theme::decorateCard(updates);
+    auto *updateBox = new QVBoxLayout(updates);
+    updateBox->setContentsMargins(18, 16, 18, 16);
+    updateBox->setSpacing(10);
+
+    auto *updateTitle = new QLabel(QStringLiteral("检查更新"), updates);
+    updateTitle->setStyleSheet(QStringLiteral("font-size: 14px; font-weight: 700;"));
+    updateBox->addWidget(updateTitle);
+
+    statusLabel_ = new QLabel(QStringLiteral("还没检查过更新"), updates);
+    Theme::setWidgetCss(statusLabel_, QStringLiteral("color: {textPrimary}; font-size: 13px;"));
     statusLabel_->setWordWrap(true);
-    root->addWidget(statusLabel_);
+    updateBox->addWidget(statusLabel_);
 
-    // 进度条平时不占位：只在下载那几秒出现，用真实收到的字节数驱动。
-    progressBar_ = new QProgressBar(this);
+    // 进度条平时不占位：只在下载那几十秒出现，用真实收到的字节数驱动。
+    progressBar_ = new QProgressBar(updates);
     progressBar_->setRange(0, 100);
     progressBar_->setValue(0);
     progressBar_->setTextVisible(false);
+    progressBar_->setFixedHeight(8);
     progressBar_->setVisible(false);
-    root->addWidget(progressBar_);
+    updateBox->addWidget(progressBar_);
 
-    // 布局：次要动作靠左、主操作靠右（Windows 那一套），关闭永远在最右。
-    // 之前五颗按钮全挤在左边、"关闭"孤零零吊在右头，看着就是歪的。
+    // 次要动作靠左、主操作靠右：四颗挤在一头是上一版"看着奇怪"的原因。
     auto *actions = new QHBoxLayout();
     actions->setSpacing(8);
-    openPageButton_ = new QPushButton(QStringLiteral("打开发布页"), this);
-    openFolderButton_ = new QPushButton(QStringLiteral("打开所在文件夹"), this);
-    checkButton_ = new QPushButton(QStringLiteral("检查更新"), this);
-    downloadButton_ = new QPushButton(QStringLiteral("下载新版本"), this);
+    openPageButton_ = new QPushButton(QStringLiteral("打开发布页"), updates);
+    openFolderButton_ = new QPushButton(QStringLiteral("打开所在文件夹"), updates);
+    checkButton_ = new QPushButton(QStringLiteral("检查更新"), updates);
+    downloadButton_ = new QPushButton(QStringLiteral("下载新版本"), updates);
     downloadButton_->setEnabled(false);
     openPageButton_->setEnabled(false);
     openFolderButton_->setEnabled(false);
@@ -182,7 +224,9 @@ AboutPage::AboutPage(App::AppContext &context, QWidget *parent)
     actions->addStretch();
     actions->addWidget(checkButton_);
     actions->addWidget(downloadButton_);
-    root->addLayout(actions);
+    updateBox->addLayout(actions);
+    column->addWidget(updates);
+    column->addStretch();
 
     progressTimer_ = new QTimer(this);
     progressTimer_->setInterval(100);
