@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <QFile>
+
 #include "core/Version.h"
 
 TEST(VersionRelease, StripsOnlyTheLeadingVFromATag)
@@ -119,4 +121,38 @@ TEST(VersionFileName, KeepsOnlyPlainAsciiExeNamesAndRejectsPaths)
     // 版本号本身也可能被塞进怪字符，拼出来的文件名只留数字点和字母。
     EXPECT_EQ(Core::safeInstallerFileName(QString(), QStringLiteral("1.2.0-rc/1")),
               QStringLiteral("VCC-1.2.0-rc-1-win64.exe"));
+}
+
+/// 线上那份 release 的 JSON 喂给我们自己的解析器，看"关于页"拿到的东西对不对。
+/// 只在设了 VCC_LATEST_RELEASE_JSON=<文件路径> 时跑（CI 不碰网络，所以这条默认 skip）：
+/// 用法是 curl api.github.com/repos/mateo-ki/vcc/releases/latest 存成文件再指过来。
+/// 断言刻意不写死版本号 —— 写死就等于每次发版都要来改测试。
+TEST(VersionRelease, LiveReleaseJsonFeedsTheUpdater)
+{
+    const QString path = qEnvironmentVariable("VCC_LATEST_RELEASE_JSON");
+    if (path.isEmpty()) {
+        GTEST_SKIP() << "no VCC_LATEST_RELEASE_JSON";
+    }
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::ReadOnly)) << path.toStdString();
+    const Result<Core::Release> parsed = Core::releaseFromJsonText(
+        QString::fromUtf8(file.readAll()));
+    ASSERT_TRUE(parsed.isOk()) << parsed.error().toStdString();
+
+    const Core::Release release = parsed.value();
+    EXPECT_FALSE(release.version.isEmpty());
+    EXPECT_EQ(release.version, Core::releaseVersion(release.version))
+        << "版本号该是剥掉 v 前缀后的样子";
+    EXPECT_TRUE(release.assetName.startsWith(QStringLiteral("VCC-"))) << release.assetName.toStdString();
+    EXPECT_TRUE(release.assetName.endsWith(QStringLiteral(".exe"))) << release.assetName.toStdString();
+    EXPECT_TRUE(release.assetUrl.startsWith(QStringLiteral("https://"))) << release.assetUrl.toStdString();
+    EXPECT_GT(release.assetSize, 0u) << "资产大小没读到，进度条只能画成未知";
+    // digest 是走镜像时唯一的信任锚点，形状必须是 sha256:<64 hex>。
+    EXPECT_TRUE(release.assetDigest.startsWith(QStringLiteral("sha256:"))) << release.assetDigest.toStdString();
+    EXPECT_EQ(release.assetDigest.size(), 7 + 64) << release.assetDigest.toStdString();
+    // 我们自己的文件名消毒器必须放行 GitHub 上那个真名字（否则下载会写到别处）。
+    EXPECT_EQ(Core::safeInstallerFileName(release.assetName, release.version), release.assetName);
+    // 已发布的号不再提示更新，上一个号必须提示。
+    EXPECT_FALSE(Core::isUpdateAvailable(release.version, release.version));
+    EXPECT_TRUE(Core::isUpdateAvailable(release.version, QStringLiteral("0.0.1")));
 }
